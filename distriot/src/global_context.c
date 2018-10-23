@@ -47,6 +47,10 @@ device_ctxt* init_context(uint32_t cli_id, uint32_t cli_num, const char** edge_a
    return ctxt;
 }
 
+void set_is_gateway(device_ctxt* ctxt, int is_gateway){
+   ctxt->is_gateway = is_gateway;
+}
+
 void set_batch_size(device_ctxt* ctxt, uint32_t size){
    ctxt->batch_size = size;
 }

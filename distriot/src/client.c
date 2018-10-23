@@ -13,14 +13,14 @@ device_ctxt* init_client(uint32_t cli_id){
 
 void register_client(device_ctxt* ctxt){
    char request_type[20] = "register_gateway";
-   service_conn* conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT);
+   service_conn* conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
    send_request(request_type, 20, conn);
    close_service_connection(conn);
 }
 
 void cancel_client(device_ctxt* ctxt){
    char request_type[20] = "cancel_gateway";
-   service_conn* conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT);
+   service_conn* conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
    send_request(request_type, 20, conn);
    close_service_connection(conn);
 }
@@ -41,7 +41,7 @@ void steal_and_process_thread(void *arg){
    service_conn* conn;
    blob* temp;
    while(1){
-      conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT);
+      conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
       send_request("steal_gateway", 20, conn);
       temp = recv_data(conn);
       close_service_connection(conn);
@@ -98,6 +98,7 @@ void send_result_thread(void *arg){
 #if DEBUG_FLAG
    uint32_t task_counter = 0;   
 #endif
+   int dup_port;
    while(1){
       temp = dequeue(ctxt->result_queue);
       conn = connect_service(TCP, ctxt->gateway_local_addr, RESULT_COLLECT_PORT);
@@ -116,11 +117,18 @@ void* steal_client(void* srv_conn, void* arg){
    printf("steal_client ... ... \n");
    service_conn *conn = (service_conn *)srv_conn;
    device_ctxt* ctxt = (device_ctxt*)arg;
-   blob* temp = try_dequeue(ctxt->task_queue);
-   if(temp == NULL){
-      char data[20]="empty";
-      temp = new_blob_and_copy_data(-1, 20, (uint8_t*)data);
-   }
+   blob* temp;
+   //if (!ctxt->is_gateway) {
+   //   char data[20]="empty";
+   //   temp = new_blob_and_copy_data(-1, 20, (uint8_t*)data);
+   //   printf("Sorry ur too slow\n"); 
+   //} else { 
+      temp = try_dequeue(ctxt->task_queue);
+      if(temp == NULL){
+         char data[20]="empty";
+         temp = new_blob_and_copy_data(-1, 20, (uint8_t*)data);
+      }
+   //}
 #if DEBUG_FLAG
    printf("Stolen local task is %d\n", temp->id);
 #endif

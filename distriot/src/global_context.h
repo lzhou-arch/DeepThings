@@ -24,6 +24,7 @@ typedef struct dev_ctxt {
    char gateway_local_addr[ADDR_LEN];
    char gateway_public_addr[ADDR_LEN];
 
+   int is_gateway;
 } device_ctxt;
 
 device_ctxt* init_context(uint32_t cli_id, uint32_t cli_num, const char** edge_addr_list);

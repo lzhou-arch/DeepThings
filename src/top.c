@@ -38,7 +38,7 @@ int main(int argc, char **argv){
 
    if(0 == strcmp(get_string_arg(argc, argv, "-mode", "none"), "start")){  
       printf("start\n");
-      exec_start_gateway(START_CTRL, TCP, GATEWAY_PUBLIC_ADDR);
+      exec_start_gateway(START_CTRL + 10, TCP, GATEWAY_PUBLIC_ADDR);
    }else if(0 == strcmp(get_string_arg(argc, argv, "-mode", "none"), "gateway")){
       printf("Gateway device\n");
       printf("We have %d edge devices now\n", get_int_arg(argc, argv, "-total_edge", 0));
@@ -54,6 +54,9 @@ int main(int argc, char **argv){
       printf("This client ID is %d\n", get_int_arg(argc, argv, "-edge_id", 0));
       this_cli_id = get_int_arg(argc, argv, "-edge_id", 0);
       deepthings_stealer_edge(partitions_h, partitions_w, fused_layers, network_file, weight_file, this_cli_id);
+   }else {
+      printf("Invalid cmd.\n");
+      exit(-1);
    }
    return 0;
 }

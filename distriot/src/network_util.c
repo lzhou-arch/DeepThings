@@ -39,7 +39,7 @@ int service_init(int portno, ctrl_proto proto){
 	exit(EXIT_FAILURE);
    }
    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0){
-	printf("ERROR on binding\n");
+	printf("ERROR on binding (port: %d)\n", portno);
 	exit(EXIT_FAILURE);
    }
    if (proto == TCP) listen(sockfd, 10);/*back_log numbers*/ 

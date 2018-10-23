@@ -15,6 +15,7 @@ device_ctxt* deepthings_edge_init(uint32_t N, uint32_t M, uint32_t fused_layers,
    model->ftp_para_reuse = preform_ftp_reuse(model->net_para, model->ftp_para);
 #endif
    ctxt->model = model;
+   set_is_gateway(ctxt, 0);
    set_gateway_local_addr(ctxt, GATEWAY_LOCAL_ADDR);
    set_gateway_public_addr(ctxt, GATEWAY_PUBLIC_ADDR);
    set_total_frames(ctxt, FRAME_NUM);
@@ -32,7 +33,7 @@ void send_reuse_data(device_ctxt* ctxt, blob* task_input_blob){
    service_conn* conn;
 
    blob* temp  = self_reuse_data_serialization(ctxt, get_blob_task_id(task_input_blob), get_blob_frame_seq(task_input_blob));
-   conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT);
+   conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
    send_request("reuse_data", 20, conn);
 #if DEBUG_DEEP_EDGE
    printf("send self reuse data for task %d:%d \n", get_blob_cli_id(task_input_blob), get_blob_task_id(task_input_blob)); 
@@ -50,7 +51,7 @@ void request_reuse_data(device_ctxt* ctxt, blob* task_input_blob, bool* reuse_da
    if(!need_reuse_data_from_gateway(reuse_data_is_required)) return;/*Reuse data are all generated locally*/
 
    service_conn* conn;
-   conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT);
+   conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
    send_request("request_reuse_data", 20, conn);
    char data[20]="empty";
    blob* temp = new_blob_and_copy_data(get_blob_task_id(task_input_blob), 20, (uint8_t*)data);
@@ -110,11 +111,19 @@ void partition_frame_and_perform_inference_thread(void *arg){
       /*Wait for i/o device input*/
       /*recv_img()*/
 
+      printf("Load image...\n");
+      double time = sys_now_in_sec();
       /*Load image and partition, fill task queues*/
       load_image_as_model_input(model, frame_num);
+      printf("Image loaded in: %lf seconds\n", sys_now_in_sec() - time);
+      time = sys_now_in_sec();
       partition_and_enqueue(ctxt, frame_num);
+      printf("Input partitioned in: %lf seconds\n", sys_now_in_sec() - time);
       register_client(ctxt);
 
+      time = sys_now_in_sec();
+      double time_tmp;
+      int num_task = 0;
       /*Dequeue and process task*/
       while(1){
          temp = try_dequeue(ctxt->task_queue);
@@ -133,7 +142,6 @@ void partition_frame_and_perform_inference_thread(void *arg){
             free_blob(temp);
             temp = shrinked_temp;
 
-
             reuse_data_is_required = check_missing_coverage(model, get_blob_task_id(temp), get_blob_frame_seq(temp));
 #if DEBUG_DEEP_EDGE
             printf("Request data from gateway, is there anything missing locally? ...\n");
@@ -148,12 +156,23 @@ void partition_frame_and_perform_inference_thread(void *arg){
 #endif/*DEBUG_DEEP_EDGE*/
 
 #endif/*DATA_REUSE*/
+#if DEBUG_TIMING
+         time_tmp = sys_now_in_sec();
+#endif
          process_task(ctxt, temp, data_ready);
+#if DEBUG_TIMING
+         time_tmp = sys_now_in_sec() - time_tmp;
+         printf("Process task in: %f\n", time_tmp);
+         num_task++;
+#endif
          free_blob(temp);
 #if DEBUG_COMMU_SIZE
          printf("======Communication size at edge is: %f======\n", ((double)commu_size)/(1024.0*1024.0*FRAME_NUM));
 #endif
       }
+#if DEBUG_TIMING
+      printf("Early cnn processed in: %lf (avg: %lf)\n", sys_now_in_sec() - time, (sys_now_in_sec() - time) / num_task);
+#endif
 
       /*Unregister and prepare for next image*/
       cancel_client(ctxt);
@@ -177,8 +196,11 @@ void steal_partition_and_perform_inference_thread(void *arg){
 #endif
    service_conn* conn;
    blob* temp;
+   double time;
+   double total_time = 0;
+   int num_task = 0;
    while(1){
-      conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT);
+      conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
       send_request("steal_gateway", 20, conn);
       temp = recv_data(conn);
       close_service_connection(conn);
@@ -188,6 +210,7 @@ void steal_partition_and_perform_inference_thread(void *arg){
          continue;
       }
       
+      time = sys_now_in_sec();
       conn = connect_service(TCP, (const char *)temp->data, WORK_STEAL_PORT);
       send_request("steal_client", 20, conn);
       free_blob(temp);
@@ -212,7 +235,16 @@ void steal_partition_and_perform_inference_thread(void *arg){
       free_blob(reuse_info_blob);
 #endif
       close_service_connection(conn);
+#if DEBUG_TIMING
+      printf("Fetch task in: %f\n", sys_now_in_sec() - time);
+#endif
       process_task(ctxt, temp, data_ready);
+#if DEBUG_TIMING
+      num_task++;
+      double time_tmp = sys_now_in_sec() - time;
+      total_time +=  time_tmp;
+      printf("Process task in: %lf (total: %lf/avg: %lf)\n", time_tmp, total_time, total_time / num_task);
+#endif
       free_blob(temp);
    }
 #ifdef NNPACK
@@ -323,23 +355,22 @@ void deepthings_serve_stealing_thread(void *arg){
 
 void deepthings_stealer_edge(uint32_t N, uint32_t M, uint32_t fused_layers, char* network, char* weights, uint32_t edge_id){
 
-
    device_ctxt* ctxt = deepthings_edge_init(N, M, fused_layers, network, weights, edge_id);
-   exec_barrier(START_CTRL, TCP, ctxt);
+   //exec_barrier(START_CTRL, TCP, ctxt);
+   exec_barrier_edge(START_CTRL, TCP, ctxt);
 
    sys_thread_t t1 = sys_thread_new("steal_partition_and_perform_inference_thread", steal_partition_and_perform_inference_thread, ctxt, 0, 0);
    sys_thread_t t2 = sys_thread_new("send_result_thread", send_result_thread, ctxt, 0, 0);
 
    sys_thread_join(t1);
    sys_thread_join(t2);
-
 }
 
 void deepthings_victim_edge(uint32_t N, uint32_t M, uint32_t fused_layers, char* network, char* weights, uint32_t edge_id){
 
-
    device_ctxt* ctxt = deepthings_edge_init(N, M, fused_layers, network, weights, edge_id);
-   exec_barrier(START_CTRL, TCP, ctxt);
+   //exec_barrier(START_CTRL, TCP, ctxt);
+   exec_barrier_edge(START_CTRL, TCP, ctxt);
 
    sys_thread_t t1 = sys_thread_new("partition_frame_and_perform_inference_thread", partition_frame_and_perform_inference_thread, ctxt, 0, 0);
    sys_thread_t t2 = sys_thread_new("send_result_thread", send_result_thread, ctxt, 0, 0);
@@ -348,7 +379,5 @@ void deepthings_victim_edge(uint32_t N, uint32_t M, uint32_t fused_layers, char*
    sys_thread_join(t1);
    sys_thread_join(t2);
    sys_thread_join(t3);
-
-
 }
 

@@ -34,6 +34,24 @@ void exec_barrier(int portno, ctrl_proto proto, device_ctxt* ctxt)
    close_service(service);
 }
 
+void exec_barrier_gateway(int portno, ctrl_proto proto, device_ctxt* ctxt)
+{
+   const char* request_types[]={"start_gateway", "none"};
+   void* (*handlers[])(void*, void*) = {start_gateway};
+   int service = service_init(portno, proto);
+   start_service_for_n_times(service, proto, request_types, 2, handlers, ctxt, 1);
+   close_service(service);
+}
+
+void exec_barrier_edge(int portno, ctrl_proto proto, device_ctxt* ctxt)
+{
+   const char* request_types[]={"start_edge", "none"};
+   void* (*handlers[])(void*, void*) = {start_edge};
+   int service = service_init(portno, proto);
+   start_service_for_n_times(service, proto, request_types, 2, handlers, ctxt, 1);
+   close_service(service);
+}
+
 int32_t get_client_id(const char* ip_addr, device_ctxt* ctxt){
    uint32_t i;
    for(i = 0; i < ctxt->total_cli_num; i++){

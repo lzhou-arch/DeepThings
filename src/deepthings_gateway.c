@@ -20,6 +20,7 @@ device_ctxt* deepthings_gateway_init(uint32_t N, uint32_t M, uint32_t fused_laye
    model->ftp_para_reuse = preform_ftp_reuse(model->net_para, model->ftp_para);
 #endif
    ctxt->model = model;
+   set_is_gateway(ctxt, 1);
    set_gateway_local_addr(ctxt, GATEWAY_LOCAL_ADDR);
    set_gateway_public_addr(ctxt, GATEWAY_PUBLIC_ADDR);
    set_total_frames(ctxt, FRAME_NUM);
@@ -133,9 +134,11 @@ void deepthings_merge_result_thread(void *arg){
       printf("Client %d, frame sequence number %d, all partitions are merged in deepthings_merge_result_thread\n", cli_id, frame_seq);
 #endif
       float* fused_output = (float*)(temp->data);
-      image_holder img = load_image_as_model_input(model, get_blob_frame_seq(temp));
       set_model_input(model, fused_output);
+      double time = sys_now_in_sec();
       forward_all(model, model->ftp_para->fused_layers);   
+      printf(" Predicted in: %f\n", sys_now_in_sec() - time);
+      image_holder img = load_image_as_model_input(model, get_blob_frame_seq(temp));
       draw_object_boxes(model, get_blob_frame_seq(temp));
       free_image_holder(model, img);
       free_blob(temp);
@@ -256,7 +259,7 @@ void deepthings_work_stealing_thread(void *arg){
    void* (*handlers[])(void*, void*) = {register_gateway, cancel_gateway, steal_gateway};
 #endif
 
-   int wst_service = service_init(WORK_STEAL_PORT, TCP);
+   int wst_service = service_init(WORK_STEAL_PORT + 10, TCP);
 #if DATA_REUSE
    start_service(wst_service, TCP, request_types, 5, handlers, arg);
 #else
@@ -271,7 +274,8 @@ void deepthings_gateway(uint32_t N, uint32_t M, uint32_t fused_layers, char* net
    sys_thread_t t3 = sys_thread_new("deepthings_work_stealing_thread", deepthings_work_stealing_thread, ctxt, 0, 0);
    sys_thread_t t1 = sys_thread_new("deepthings_collect_result_thread", deepthings_collect_result_thread, ctxt, 0, 0);
    sys_thread_t t2 = sys_thread_new("deepthings_merge_result_thread", deepthings_merge_result_thread, ctxt, 0, 0);
-   exec_barrier(START_CTRL, TCP, ctxt);
+   //exec_barrier(START_CTRL, TCP, ctxt);
+   exec_barrier_gateway(START_CTRL + 10, TCP, ctxt);
 #if DEBUG_TIMING
    start_time = sys_now_in_sec();
 #endif
