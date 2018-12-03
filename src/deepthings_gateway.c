@@ -271,7 +271,9 @@ void deepthings_work_stealing_thread(void *arg){
 
 void deepthings_gateway(uint32_t N, uint32_t M, uint32_t fused_layers, char* network, char* weights, uint32_t total_edge_number, const char** addr_list){
    device_ctxt* ctxt = deepthings_gateway_init(N, M, fused_layers, network, weights, total_edge_number, addr_list);
+#if POLL_MODE 
    sys_thread_t t3 = sys_thread_new("deepthings_work_stealing_thread", deepthings_work_stealing_thread, ctxt, 0, 0);
+#endif
    sys_thread_t t1 = sys_thread_new("deepthings_collect_result_thread", deepthings_collect_result_thread, ctxt, 0, 0);
    sys_thread_t t2 = sys_thread_new("deepthings_merge_result_thread", deepthings_merge_result_thread, ctxt, 0, 0);
    //exec_barrier(START_CTRL, TCP, ctxt);
@@ -281,7 +283,9 @@ void deepthings_gateway(uint32_t N, uint32_t M, uint32_t fused_layers, char* net
 #endif
    sys_thread_join(t1);
    sys_thread_join(t2);
+#if POLL_MODE 
    sys_thread_join(t3);
+#endif
 }
 
 

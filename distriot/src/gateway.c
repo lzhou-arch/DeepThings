@@ -121,7 +121,17 @@ void* cancel_gateway(void* srv_conn, void *arg){
 void* steal_gateway(void* srv_conn, void *arg){
    service_conn *conn = (service_conn *)srv_conn;
    device_ctxt* ctxt = (device_ctxt*)arg;
-   blob* temp = try_dequeue(ctxt->registration_list);
+   // first check recv stats
+   blob* temp;
+#if LOAD_AWARE
+   temp = recv_data(conn);
+   if (temp->id == 110) {
+     //printf("recv stats.\n");
+     temp = try_dequeue(ctxt->registration_list);
+   } else temp == NULL;
+#else
+   temp = try_dequeue(ctxt->registration_list);
+#endif
    if(temp == NULL){
       char ip_addr[ADDRSTRLEN]="empty";
       temp = new_blob_and_copy_data(-1, ADDRSTRLEN, (uint8_t*)ip_addr);

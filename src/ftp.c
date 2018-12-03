@@ -59,6 +59,9 @@ static tile_region traversal(network_parameters* net_para, tile_region output, u
       input.w2 = output.w2*stride + stride -1;
       input.h1 = output.h1*stride;
       input.h2 = output.h2*stride + stride -1;
+   }else { 
+      printf("Error: Undefined partition layer\n");
+      exit(-1);
    }
    input.w = input.w2 -input.w1 + 1;
    input.h = input.h2 -input.h1 + 1;

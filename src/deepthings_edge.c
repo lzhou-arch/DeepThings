@@ -3,6 +3,10 @@
 #include "inference_engine_helper.h"
 #include "frame_partitioner.h"
 #include "reuse_data_serialization.h"
+#if LOAD_AWARE 
+#include "cpu.h"
+#include "memory.h"
+#endif
 #if DEBUG_COMMU_SIZE
 static double commu_size;
 #endif
@@ -78,6 +82,7 @@ void request_reuse_data(device_ctxt* ctxt, blob* task_input_blob, bool* reuse_da
 }
 #endif
 
+// TODO(lizhou): make this as API
 static inline void process_task(device_ctxt* ctxt, blob* temp, bool is_reuse){
    cnn_model* model = (cnn_model*)(ctxt->model);
    blob* result;
@@ -116,13 +121,12 @@ void partition_frame_and_perform_inference_thread(void *arg){
       /*Load image and partition, fill task queues*/
       load_image_as_model_input(model, frame_num);
       printf("Image loaded in: %lf seconds\n", sys_now_in_sec() - time);
-      time = sys_now_in_sec();
+      time= sys_now_in_sec();
       partition_and_enqueue(ctxt, frame_num);
       printf("Input partitioned in: %lf seconds\n", sys_now_in_sec() - time);
       register_client(ctxt);
 
       time = sys_now_in_sec();
-      double time_tmp;
       int num_task = 0;
       /*Dequeue and process task*/
       while(1){
@@ -157,7 +161,7 @@ void partition_frame_and_perform_inference_thread(void *arg){
 
 #endif/*DATA_REUSE*/
 #if DEBUG_TIMING
-         time_tmp = sys_now_in_sec();
+         double time_tmp = sys_now_in_sec();
 #endif
          process_task(ctxt, temp, data_ready);
 #if DEBUG_TIMING
@@ -196,12 +200,32 @@ void steal_partition_and_perform_inference_thread(void *arg){
 #endif
    service_conn* conn;
    blob* temp;
-   double time;
-   double total_time = 0;
+   double time_tmp;
+   double total_exec_time = 0;
+   double total_fetch_time = 0;
    int num_task = 0;
    while(1){
+#if LOAD_AWARE
+      // check stats e.g. cpu/memory
+      struct MemoryStatus status;
+      mem_status(&status);
+      float mem_load = status.used_mem / status.total_mem;
+      float cpu_load = cpu_percentage(CPU_USAGE_DELAY);
+      printf("cpu load: %f, mem load: %f\n", cpu_load, mem_load);
+      if (cpu_load > MAX_CPU_LOAD || mem_load > MAX_MEM_LOAD) {
+        printf("cpu/mem load is too high\n");
+        sys_sleep(100);
+        continue;
+      }
+#endif
       conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
+      //printf("send request.\n");
       send_request("steal_gateway", 20, conn);
+#if LOAD_AWARE
+      // send stats
+      temp = new_empty_blob(110);
+      send_data(temp, conn);
+#endif
       temp = recv_data(conn);
       close_service_connection(conn);
       if(temp->id == -1){
@@ -210,7 +234,7 @@ void steal_partition_and_perform_inference_thread(void *arg){
          continue;
       }
       
-      time = sys_now_in_sec();
+      time_tmp = sys_now_in_sec();
       conn = connect_service(TCP, (const char *)temp->data, WORK_STEAL_PORT);
       send_request("steal_client", 20, conn);
       free_blob(temp);
@@ -235,15 +259,18 @@ void steal_partition_and_perform_inference_thread(void *arg){
       free_blob(reuse_info_blob);
 #endif
       close_service_connection(conn);
+      num_task++;
 #if DEBUG_TIMING
-      printf("Fetch task in: %f\n", sys_now_in_sec() - time);
+      time_tmp = sys_now_in_sec() - time_tmp;
+      total_fetch_time +=  time_tmp;
+      printf("Fetch task in: %lf (total: %lf/avg: %lf)\n", time_tmp, total_fetch_time, total_fetch_time/ num_task);
 #endif
+      time_tmp = sys_now_in_sec();
       process_task(ctxt, temp, data_ready);
 #if DEBUG_TIMING
-      num_task++;
-      double time_tmp = sys_now_in_sec() - time;
-      total_time +=  time_tmp;
-      printf("Process task in: %lf (total: %lf/avg: %lf)\n", time_tmp, total_time, total_time / num_task);
+      time_tmp = sys_now_in_sec() - time_tmp;
+      total_exec_time +=  time_tmp;
+      printf("Process task in: %lf (total: %lf/avg: %lf)\n", time_tmp, total_exec_time, total_exec_time / num_task);
 #endif
       free_blob(temp);
    }
@@ -335,6 +362,16 @@ void* update_coverage(void* srv_conn, void* arg){
 }
 #endif
 
+// TODO(lizhou)
+//void recv_partition_and_perform_inference_thread(void *arg){
+//   const char* request_types[]={"remote_exec"};
+//   void* (*handlers[])(void*, void*) = {remote_exec};
+//
+//   int wst_service = service_init(WORK_STEAL_PORT, TCP);
+//   start_service(wst_service, TCP, request_types, 1, handlers, arg);
+//   close_service(wst_service);
+//}
+
 void deepthings_serve_stealing_thread(void *arg){
 #if DATA_REUSE
    const char* request_types[]={"steal_client", "update_coverage"};
@@ -352,14 +389,17 @@ void deepthings_serve_stealing_thread(void *arg){
    close_service(wst_service);
 }
 
-
 void deepthings_stealer_edge(uint32_t N, uint32_t M, uint32_t fused_layers, char* network, char* weights, uint32_t edge_id){
 
    device_ctxt* ctxt = deepthings_edge_init(N, M, fused_layers, network, weights, edge_id);
    //exec_barrier(START_CTRL, TCP, ctxt);
    exec_barrier_edge(START_CTRL, TCP, ctxt);
 
+#if POLL_MODE
    sys_thread_t t1 = sys_thread_new("steal_partition_and_perform_inference_thread", steal_partition_and_perform_inference_thread, ctxt, 0, 0);
+#else  // Push mode
+   sys_thread_t t1 = sys_thread_new("recv_partition_and_perform_inference_thread", recv_partition_and_perform_inference_thread, ctxt, 0, 0);
+#endif
    sys_thread_t t2 = sys_thread_new("send_result_thread", send_result_thread, ctxt, 0, 0);
 
    sys_thread_join(t1);
@@ -374,7 +414,11 @@ void deepthings_victim_edge(uint32_t N, uint32_t M, uint32_t fused_layers, char*
 
    sys_thread_t t1 = sys_thread_new("partition_frame_and_perform_inference_thread", partition_frame_and_perform_inference_thread, ctxt, 0, 0);
    sys_thread_t t2 = sys_thread_new("send_result_thread", send_result_thread, ctxt, 0, 0);
+#if POLL_MODE
    sys_thread_t t3 = sys_thread_new("deepthings_serve_stealing_thread", deepthings_serve_stealing_thread, ctxt, 0, 0);
+#else  // Push mode
+   sys_thread_t t3 = sys_thread_new("deepthings_task_sharing_thread", deepthings_task_sharing_thread, ctxt, 0, 0);
+#endif
 
    sys_thread_join(t1);
    sys_thread_join(t2);

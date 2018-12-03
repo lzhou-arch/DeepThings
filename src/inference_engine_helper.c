@@ -103,10 +103,12 @@ void load_image_by_number(image* img, uint32_t id){
    int32_t w = img->w;
    char filename[256];
    sprintf(filename, "data/input/%d.jpg", id);
+   printf("read data/input/%d.jpg", id);
    image im = load_image_color(filename, 0, 0);
    image sized = letterbox_image(im, w, h);
    free_image(im);
    img->data = sized.data;
+   printf(" img resized to: %lu\n", sizeof(float)*img->w*img->h*img->c);
 }
 
 image load_image_as_model_input(cnn_model* model, uint32_t id){

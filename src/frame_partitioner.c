@@ -28,8 +28,8 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
          annotate_blob(temp, get_this_client_id(ctxt), frame_num, task);
          enqueue(ctxt->task_queue, temp);
          free_blob(temp);
+         printf("Task %lu, size: %lu\n", task, data_size); 
       }
-
    }
 #if DATA_REUSE
 
