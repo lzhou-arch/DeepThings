@@ -6,7 +6,7 @@ device_ctxt* init_gateway(uint32_t cli_num, const char** edge_addr_list){
    device_ctxt* ctxt = (device_ctxt*)malloc(sizeof(device_ctxt)); 
    uint32_t i;
 
-/*Queues used in gateway device*/
+   /*Queues used in gateway device*/
    ctxt->results_pool = (thread_safe_queue**)malloc(sizeof(thread_safe_queue*)*cli_num);
    ctxt->results_counter = (uint32_t*)malloc(sizeof(uint32_t)*cli_num);
    for(i = 0; i < cli_num; i++){
@@ -21,8 +21,6 @@ device_ctxt* init_gateway(uint32_t cli_num, const char** edge_addr_list){
       ctxt->addr_list[i] = (char*)malloc(sizeof(char)*ADDR_LEN);
       strcpy(ctxt->addr_list[i], edge_addr_list[i]);
    }
- 
-
 
    return ctxt;
 }
@@ -31,7 +29,7 @@ void* result_gateway(void* srv_conn, void* arg){
    printf("result_gateway ... ... \n");
    device_ctxt* ctxt = (device_ctxt*)arg;
    service_conn *conn = (service_conn *)srv_conn;
-   int32_t cli_id;
+   int32_t cli_id, sp_id;
 #if DEBUG_FLAG
    char ip_addr[ADDRSTRLEN];
    int32_t processing_cli_id;
@@ -42,8 +40,9 @@ void* result_gateway(void* srv_conn, void* arg){
 #endif
    blob* temp = recv_data(conn);
    cli_id = get_blob_cli_id(temp);
+   sp_id = get_blob_sp_id(temp);
 #if DEBUG_FLAG
-   printf("Result from %d: %s is for client %d, total number recved is %d\n", processing_cli_id, ip_addr, cli_id, ctxt->results_counter[cli_id]);
+   printf("Result from %d: %s is for client %d at sp %d, total number recved is %d\n", processing_cli_id, ip_addr, cli_id, sp_id, ctxt->results_counter[cli_id]);
 #endif
    enqueue(ctxt->results_pool[cli_id], temp);
    free_blob(temp);

@@ -3,8 +3,8 @@
 #include "inference_engine_helper.h"
 
 static inline void grid(network_parameters* net_para, ftp_parameters* ftp_para, uint32_t M, uint32_t N){
-   int32_t w = net_para->output_maps[ftp_para->fused_layers-1].w;
-   int32_t h = net_para->output_maps[ftp_para->fused_layers-1].h;
+   int32_t w = net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w;
+   int32_t h = net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h;
    int32_t partition_w = M;
    int32_t partition_h = N;
    int32_t stride_w = ceil(((float)w)/((float)partition_w));    
@@ -34,8 +34,8 @@ static inline void grid(network_parameters* net_para, ftp_parameters* ftp_para, 
       if(i == (partition_h-2)) {end_h = h - 1;}
       else {end_h = end_h + stride_h;}
    }
-
 }
+
 /*
 Input:
    ftp_para->output_tiles[ftp_para->task_id[i][j]][l]
@@ -60,20 +60,21 @@ static tile_region traversal(network_parameters* net_para, tile_region output, u
       input.h1 = output.h1*stride;
       input.h2 = output.h2*stride + stride -1;
    }else { 
-      printf("Error: Undefined partition layer\n");
+      fprintf(stderr, "Error: Undefined partition layer: %d\n", l);
       exit(-1);
    }
    input.w = input.w2 -input.w1 + 1;
    input.h = input.h2 -input.h1 + 1;
    return input;
-
 }
 
-ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t fused_layers, network_parameters* net_para){
+ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_t fused_layers, network_parameters* net_para){
+  fprintf(stderr, "Perform ftp from [%d, %d)\n", from_layer, from_layer + fused_layers);
    ftp_parameters* ftp_para = (ftp_parameters*)malloc(sizeof(ftp_parameters));
    ftp_para->partitions = N*M;
    ftp_para->partitions_h = N;
    ftp_para->partitions_w = M;
+   ftp_para->from_layer = from_layer;
    ftp_para->fused_layers = fused_layers;
    int32_t i, j, l;
    int32_t id = 0;
@@ -86,11 +87,12 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t fused_layers, netwo
    grid(net_para, ftp_para, M, N);
    for(i = 0; i < ftp_para->partitions_h; i++){
       for(j = 0; j < ftp_para->partitions_w; j++){
-         for(l = fused_layers-1; l >= 0; l--){
-            ftp_para->input_tiles[ftp_para->task_id[i][j]][l] = 
-                       traversal(net_para, ftp_para->output_tiles[ftp_para->task_id[i][j]][l], l);
-            if(l>0) ftp_para->output_tiles[ftp_para->task_id[i][j]][l-1] 
-                     = ftp_para->input_tiles[ftp_para->task_id[i][j]][l];
+        // offset: from_layer
+         for(l = from_layer+fused_layers-1; l >= (int32_t) from_layer; l--){
+            ftp_para->input_tiles[ftp_para->task_id[i][j]][l-from_layer] = 
+                       traversal(net_para, ftp_para->output_tiles[ftp_para->task_id[i][j]][l-from_layer], l);
+            if(l>from_layer) ftp_para->output_tiles[ftp_para->task_id[i][j]][l-from_layer-1] 
+                     = ftp_para->input_tiles[ftp_para->task_id[i][j]][l-from_layer];
          }
       }
    }

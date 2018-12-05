@@ -41,9 +41,14 @@
 #include "ftp.h"
 
 typedef struct cnn_model_wrapper{
-   ftp_parameters* ftp_para;
+   // possible multiple split points
+   uint32_t num_sp;
+   uint32_t cur_sp;
+   ftp_parameters** ftp_para_list;
+   ftp_parameters* ftp_para; // current para in use
    network_parameters* net_para;
 #if DATA_REUSE
+   ftp_parameters_reuse** ftp_para_reuse_list;
    ftp_parameters_reuse* ftp_para_reuse;
 #endif
    network* net;/*network is from Darknet*/
@@ -54,7 +59,8 @@ typedef struct cnn_model_wrapper{
 #define image_holder image
 
 
-cnn_model* load_cnn_model(char* cfg, char* weights);
+//cnn_model* load_cnn_model(char* cfg, char* weights);
+cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto);
 void forward_partition(cnn_model* model, uint32_t task_id, bool is_reuse);
 image_holder load_image_as_model_input(cnn_model* model, uint32_t id);
 void free_image_holder(cnn_model* model, image_holder sized);
@@ -64,6 +70,7 @@ void draw_object_boxes(cnn_model* model, uint32_t id);
 float* crop_feature_maps(float* input, uint32_t w, uint32_t h, uint32_t c, uint32_t dw1, uint32_t dw2, uint32_t dh1, uint32_t dh2);
 void stitch_feature_maps(float* input, float* output, uint32_t w, uint32_t h, uint32_t c, uint32_t dw1, uint32_t dw2, uint32_t dh1, uint32_t dh2);
 
+void set_model_ftp_sp(cnn_model* model, uint32_t i);
 float* get_model_input(cnn_model* model);
 void set_model_input(cnn_model* model, float* input);
 float* get_model_output(cnn_model* model, uint32_t layer);

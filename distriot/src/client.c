@@ -2,10 +2,16 @@
 
 device_ctxt* init_client(uint32_t cli_id){
    device_ctxt* ctxt = (device_ctxt*)malloc(sizeof(device_ctxt)); 
-/*Queues used in edge device*/
+   /*Queues used in edge device*/
    ctxt->task_queue = new_queue(MAX_QUEUE_SIZE);
    ctxt->result_queue = new_queue(MAX_QUEUE_SIZE); 
+   ctxt->ready_queue = new_queue(MAX_QUEUE_SIZE); 
    ctxt->this_cli_id = cli_id;
+
+   // indicator for temp results of each split point
+   ctxt->results_counter_sp = 0; 
+   ctxt->ready_pool = new_queue(MAX_QUEUE_SIZE);
+   //ctxt->ready_sp = 0;
 
    return ctxt;
 }
@@ -76,7 +82,7 @@ void generate_and_process_thread(void *arg){
       register_client(ctxt);
       for(task = 0; task < ctxt->batch_size; task ++){
          temp = new_blob_and_copy_data((int32_t)task, 20, (uint8_t*)data);
-         annotate_blob(temp, get_this_client_id(ctxt), frame_num, task);
+         annotate_blob(temp, get_this_client_id(ctxt), frame_num, task, 0);
          enqueue(ctxt->task_queue, temp);
          free_blob(temp);
       }
@@ -98,11 +104,24 @@ void send_result_thread(void *arg){
 #if DEBUG_FLAG
    uint32_t task_counter = 0;   
 #endif
-   int dup_port;
    while(1){
       temp = dequeue(ctxt->result_queue);
-      conn = connect_service(TCP, ctxt->gateway_local_addr, RESULT_COLLECT_PORT);
-      send_request("result_gateway", 20, conn);
+      // debug
+      char local_addr[ADDR_LEN];
+      strcpy(local_addr, "192.168.1.9");
+
+      if(get_blob_sp_id(temp) == ctxt->num_sp-1) {
+        fprintf(stderr, "Send to gateway...\n");
+        conn = connect_service(TCP, ctxt->gateway_local_addr, RESULT_COLLECT_PORT);
+        send_request("result_gateway", 20, conn);
+      }
+      //else conn = connect_service(TCP, ctxt->addr_list[get_blob_cli_id(temp)], RESULT_COLLECT_PORT);
+      else {
+        fprintf(stderr, "Send to local...\n");
+        conn = connect_service(TCP, local_addr, RESULT_COLLECT_PORT + 10); // port for local 
+        send_request("result_source", 20, conn);
+      }
+
 #if DEBUG_FLAG
       task_counter ++;  
       printf("send_result for task %d:%d, total number is %d\n", get_blob_cli_id(temp), get_blob_task_id(temp), task_counter); 

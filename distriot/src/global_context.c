@@ -55,6 +55,10 @@ void set_batch_size(device_ctxt* ctxt, uint32_t size){
    ctxt->batch_size = size;
 }
 
+void set_batch_size_sp(device_ctxt* ctxt, uint32_t size, uint32_t i){
+   ctxt->batch_size_list[i] = size;
+}
+
 void set_gateway_local_addr(device_ctxt* ctxt, const char* addr){
    strcpy(ctxt->gateway_local_addr, addr);
 }
@@ -65,6 +69,10 @@ void set_gateway_public_addr(device_ctxt* ctxt, const char* addr){
 
 void set_total_frames(device_ctxt* ctxt, uint32_t frame_num){
    ctxt->total_frames = frame_num;
+}
+
+void set_num_sp(device_ctxt* ctxt, uint32_t num_sp) {
+  ctxt->num_sp = num_sp;
 }
 
 

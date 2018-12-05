@@ -18,6 +18,8 @@ typedef struct def_ftp_para{
    uint32_t partitions;
    uint32_t partitions_w;
    uint32_t partitions_h;
+   // can start from any layer, default is 0
+   uint32_t from_layer;
    uint32_t fused_layers;
    uint32_t task_id[PARTITIONS_H_MAX][PARTITIONS_W_MAX];
    tile_region input_tiles[PARTITIONS_MAX][FUSED_LAYERS_MAX];
@@ -84,6 +86,6 @@ void set_data(overlapped_tile_data * overlap, uint32_t pos, float* data);
 
 #endif
 
-ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t fused_layers, network_parameters* net_para);
+ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from, uint32_t fused_layers, network_parameters* net_para);
 void print_tile_region(tile_region tile);
 #endif

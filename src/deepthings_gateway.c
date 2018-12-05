@@ -12,10 +12,17 @@ static uint32_t acc_frames[MAX_EDGE_NUM];
 static double commu_size;
 #endif
 
-device_ctxt* deepthings_gateway_init(uint32_t N, uint32_t M, uint32_t fused_layers, char* network, char* weights, uint32_t total_edge_number, const char** addr_list){
+device_ctxt* deepthings_gateway_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t total_edge_number, const char** addr_list){
    device_ctxt* ctxt = init_gateway(total_edge_number, addr_list);
-   cnn_model* model = load_cnn_model(network, weights);
-   model->ftp_para = preform_ftp(N, M, fused_layers, model->net_para);
+   // only need to load weights from [last_from_layer+last_fused_layer, n)
+   cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1], -1);
+   model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
+   for (int i = 0; i < num_sp; i++) {
+     model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);
+   }
+   model->num_sp = num_sp;
+   // set to last sp
+   model->ftp_para = model->ftp_para_list[num_sp-1];
 #if DATA_REUSE
    model->ftp_para_reuse = preform_ftp_reuse(model->net_para, model->ftp_para);
 #endif
@@ -24,11 +31,16 @@ device_ctxt* deepthings_gateway_init(uint32_t N, uint32_t M, uint32_t fused_laye
    set_gateway_local_addr(ctxt, GATEWAY_LOCAL_ADDR);
    set_gateway_public_addr(ctxt, GATEWAY_PUBLIC_ADDR);
    set_total_frames(ctxt, FRAME_NUM);
-   set_batch_size(ctxt, N*M);
+   ctxt->batch_size_list = (uint32_t*)malloc(sizeof(uint32_t)*num_sp);
+   for (int i = 0; i < num_sp; i++) {
+     set_batch_size_sp(ctxt, N[i]*M[i], i);
+   }
+   // set to last sp
+   set_batch_size(ctxt, N[num_sp-1]*M[num_sp-1]);
+   set_num_sp(ctxt, num_sp);
 
    return ctxt;
 }
-
 
 #if DATA_REUSE
 void notify_coverage(device_ctxt* ctxt, blob* task_input_blob, uint32_t cli_id){
@@ -136,7 +148,7 @@ void deepthings_merge_result_thread(void *arg){
       float* fused_output = (float*)(temp->data);
       set_model_input(model, fused_output);
       double time = sys_now_in_sec();
-      forward_all(model, model->ftp_para->fused_layers);   
+      forward_all(model, model->ftp_para->from_layer+model->ftp_para->fused_layers);   
       printf(" Predicted in: %f\n", sys_now_in_sec() - time);
       image_holder img = load_image_as_model_input(model, get_blob_frame_seq(temp));
       draw_object_boxes(model, get_blob_frame_seq(temp));
@@ -269,11 +281,12 @@ void deepthings_work_stealing_thread(void *arg){
 }
 
 
-void deepthings_gateway(uint32_t N, uint32_t M, uint32_t fused_layers, char* network, char* weights, uint32_t total_edge_number, const char** addr_list){
-   device_ctxt* ctxt = deepthings_gateway_init(N, M, fused_layers, network, weights, total_edge_number, addr_list);
+void deepthings_gateway(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t total_edge_number, const char** addr_list){
+   device_ctxt* ctxt = deepthings_gateway_init(num_sp, N, M, from_layers, fused_layers, network, weights, total_edge_number, addr_list);
 #if POLL_MODE 
    sys_thread_t t3 = sys_thread_new("deepthings_work_stealing_thread", deepthings_work_stealing_thread, ctxt, 0, 0);
 #endif
+   // collect last split point result
    sys_thread_t t1 = sys_thread_new("deepthings_collect_result_thread", deepthings_collect_result_thread, ctxt, 0, 0);
    sys_thread_t t2 = sys_thread_new("deepthings_merge_result_thread", deepthings_merge_result_thread, ctxt, 0, 0);
    //exec_barrier(START_CTRL, TCP, ctxt);

@@ -1,8 +1,9 @@
 #include "inference_engine_helper.h"
 
-cnn_model* load_cnn_model(char* cfg, char* weights){
+cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto){
    cnn_model* model = (cnn_model*)malloc(sizeof(cnn_model));
-   network *net = load_network(cfg, weights, 0);
+   network *net = load_network_from_upto(cfg, weights, from, upto, 0);
+   // set batch size to 1 for testing
    set_batch_network(net, 1);
    net->truth = 0;
    net->train = 0;
@@ -81,12 +82,16 @@ void stitch_feature_maps(float* input, float* output, uint32_t w, uint32_t h, ui
    }
 }
 
+void set_model_ftp_sp(cnn_model* model, uint32_t i) {
+  model->ftp_para = model->ftp_para_list[i];
+}
+
 float* get_model_input(cnn_model* model){
    return model->net->input;
 }
 
 void set_model_input(cnn_model* model, float* input){
-   model->net->input = input;
+  model->net->input = input;
 }
 
 float* get_model_output(cnn_model* model, uint32_t layer){
@@ -103,12 +108,12 @@ void load_image_by_number(image* img, uint32_t id){
    int32_t w = img->w;
    char filename[256];
    sprintf(filename, "data/input/%d.jpg", id);
-   printf("read data/input/%d.jpg", id);
+   fprintf(stderr, "read data/input/%d.jpg", id);
    image im = load_image_color(filename, 0, 0);
    image sized = letterbox_image(im, w, h);
    free_image(im);
    img->data = sized.data;
-   printf(" img resized to: %lu\n", sizeof(float)*img->w*img->h*img->c);
+   fprintf(stderr, " img resized to: %lu\n", sizeof(float)*img->w*img->h*img->c);
 }
 
 image load_image_as_model_input(cnn_model* model, uint32_t id){
@@ -247,15 +252,18 @@ float* stitch_reuse_output(cnn_model* model, uint32_t task_id,  uint32_t l, floa
 }
 #endif
 
+// forward partition from current layer to fused_layers
 void forward_partition(cnn_model* model, uint32_t task_id, bool is_reuse){
    network net = *(model->net);
    ftp_parameters* ftp_para = model->ftp_para;
    /*network_parameters* net_para = model->net_para;*/
    uint32_t l;
-   for(l = 0; l < ftp_para->fused_layers; l++){
-      net.layers[l].h = ftp_para->input_tiles[task_id][l].h;
+   //for(l = 0; l < ftp_para->fused_layers; l++){
+   for(l = ftp_para->from_layer; l < ftp_para->from_layer + ftp_para->fused_layers; l++){
+      uint32_t l_offset = l - ftp_para->from_layer;
+      net.layers[l].h = ftp_para->input_tiles[task_id][l_offset].h;
       net.layers[l].out_h = (net.layers[l].h/net.layers[l].stride); 
-      net.layers[l].w = ftp_para->input_tiles[task_id][l].w;
+      net.layers[l].w = ftp_para->input_tiles[task_id][l_offset].w;
       net.layers[l].out_w = (net.layers[l].w/net.layers[l].stride);
       net.layers[l].outputs = net.layers[l].out_h * net.layers[l].out_w * net.layers[l].out_c; 
       net.layers[l].inputs = net.layers[l].h * net.layers[l].w * net.layers[l].c; 
@@ -278,7 +286,9 @@ void forward_partition(cnn_model* model, uint32_t task_id, bool is_reuse){
    }
 #endif
 
-   for(l = 0; l < ftp_para->fused_layers; l++){
+   //for(l = 0; l < ftp_para->fused_layers; l++){
+   for(l = ftp_para->from_layer; l < ftp_para->from_layer + ftp_para->fused_layers; l++){
+      uint32_t l_offset = l - ftp_para->from_layer;
       net.layers[l].forward(net.layers[l], net);
       if (to_free == 1) {
          free(cropped_output); 
@@ -292,12 +302,12 @@ void forward_partition(cnn_model* model, uint32_t task_id, bool is_reuse){
       */
       tile_region tmp;
       if(net.layers[l].type == CONVOLUTIONAL){
-         tmp = relative_offsets(ftp_para->input_tiles[task_id][l], 
-                                       ftp_para->output_tiles[task_id][l]);
+         tmp = relative_offsets(ftp_para->input_tiles[task_id][l_offset], 
+                                       ftp_para->output_tiles[task_id][l_offset]);
 #if DATA_REUSE
          if((model->ftp_para_reuse->schedule[task_id] == 1)&&is_reuse){
-            tmp = relative_offsets(ftp_para_reuse->input_tiles[task_id][l], 
-                                       ftp_para_reuse->output_tiles[task_id][l]);
+            tmp = relative_offsets(ftp_para_reuse->input_tiles[task_id][l_offset], 
+                                       ftp_para_reuse->output_tiles[task_id][l_offset]);
          }
 #endif
          cropped_output = crop_feature_maps(net.layers[l].output, 

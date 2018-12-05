@@ -13,22 +13,25 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
    for(i = 0; i < model->ftp_para->partitions_h; i++){
       for(j = 0; j < model->ftp_para->partitions_w; j++){
          task = model->ftp_para->task_id[i][j];
+         fprintf(stderr, "partition task %d..\n", task);
          dw1 = model->ftp_para->input_tiles[task][0].w1;
          dw2 = model->ftp_para->input_tiles[task][0].w2;
          dh1 = model->ftp_para->input_tiles[task][0].h1;
          dh2 = model->ftp_para->input_tiles[task][0].h2;
          data = crop_feature_maps(get_model_input(model), 
-                                  net_para->input_maps[0].w, 
-                                  net_para->input_maps[0].h,
-                                  net_para->input_maps[0].c, 
+                                  net_para->input_maps[model->ftp_para->from_layer].w, 
+                                  net_para->input_maps[model->ftp_para->from_layer].h,
+                                  net_para->input_maps[model->ftp_para->from_layer].c, 
                                   dw1, dw2, dh1, dh2);
-         data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[0].c;
+       fprintf(stderr, "2..\n");
+         data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[model->ftp_para->from_layer].c;
          temp = new_blob_and_copy_data((int32_t)task, data_size, (uint8_t*)data);
          free(data);
-         annotate_blob(temp, get_this_client_id(ctxt), frame_num, task);
+         annotate_blob(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp);
+       fprintf(stderr, "3..\n");
          enqueue(ctxt->task_queue, temp);
          free_blob(temp);
-         printf("Task %lu, size: %lu\n", task, data_size); 
+         printf("Task %u, size: %u\n", task, data_size); 
       }
    }
 #if DATA_REUSE
@@ -85,6 +88,65 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
 
 }
 
+// for local source device
+blob* local_dequeue_and_merge(device_ctxt* ctxt){
+   /*Check if there is a data frame whose tasks have all been collected*/
+   cnn_model* model = (cnn_model*)(ctxt->model);
+   blob* temp = dequeue(ctxt->ready_pool);
+#if DEBUG_FLAG
+   printf("Check ready_pool... : Client %d is ready, merging the results\n", temp->id);
+#endif
+   uint32_t cli_id = temp->id;
+   free_blob(temp);
+
+   ftp_parameters *ftp_para = model->ftp_para;
+   network_parameters *net_para = model->net_para;
+
+   uint32_t stage_outs =  (net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w)*(net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h)*(net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c);
+   float* stage_out = (float*) malloc(sizeof(float)*stage_outs);  
+   uint32_t stage_out_size = sizeof(float)*stage_outs;  
+   uint32_t part = 0;
+   uint32_t task = 0;
+   uint32_t frame_num = 0;
+   uint32_t sp_id = 0;
+   float* cropped_output;
+
+   for(part = 0; part < ftp_para->partitions; part ++){
+      temp = dequeue(ctxt->ready_queue);
+      task = get_blob_task_id(temp);
+      frame_num = get_blob_frame_seq(temp);
+      sp_id = get_blob_sp_id(temp);
+
+      if(net_para->type[ftp_para->from_layer+ftp_para->fused_layers-1] == CONV_LAYER){
+         tile_region tmp = relative_offsets(ftp_para->input_tiles[task][ftp_para->fused_layers-1], 
+                                       ftp_para->output_tiles[task][ftp_para->fused_layers-1]);  
+         cropped_output = crop_feature_maps((float*)temp->data, 
+                      ftp_para->input_tiles[task][ftp_para->fused_layers-1].w, 
+                      ftp_para->input_tiles[task][ftp_para->fused_layers-1].h, 
+                      net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c, 
+                      tmp.w1, tmp.w2, tmp.h1, tmp.h2);
+      }else{cropped_output = (float*)temp->data;}
+
+      stitch_feature_maps(cropped_output, stage_out, 
+                          net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w, 
+                          net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h, 
+                          net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c, 
+                          ftp_para->output_tiles[task][ftp_para->fused_layers-1].w1, 
+                          ftp_para->output_tiles[task][ftp_para->fused_layers-1].w2,
+                          ftp_para->output_tiles[task][ftp_para->fused_layers-1].h1, 
+                          ftp_para->output_tiles[task][ftp_para->fused_layers-1].h2);
+
+      if(net_para->type[ftp_para->from_layer+ftp_para->fused_layers-1] == CONV_LAYER){free(cropped_output);}
+
+      free_blob(temp);
+   }
+
+   temp = new_blob_and_copy_data(cli_id, stage_out_size, (uint8_t*)stage_out);
+   free(stage_out);
+   annotate_blob(temp, cli_id, frame_num, task, model->cur_sp);
+   return temp;
+}
+
 blob* dequeue_and_merge(device_ctxt* ctxt){
    /*Check if there is a data frame whose tasks have all been collected*/
    cnn_model* model = (cnn_model*)(ctxt->model);
@@ -98,8 +160,7 @@ blob* dequeue_and_merge(device_ctxt* ctxt){
    ftp_parameters *ftp_para = model->ftp_para;
    network_parameters *net_para = model->net_para;
 
-
-   uint32_t stage_outs =  (net_para->output_maps[ftp_para->fused_layers-1].w)*(net_para->output_maps[ftp_para->fused_layers-1].h)*(net_para->output_maps[ftp_para->fused_layers-1].c);
+   uint32_t stage_outs =  (net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w)*(net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h)*(net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c);
    float* stage_out = (float*) malloc(sizeof(float)*stage_outs);  
    uint32_t stage_out_size = sizeof(float)*stage_outs;  
    uint32_t part = 0;
@@ -112,33 +173,33 @@ blob* dequeue_and_merge(device_ctxt* ctxt){
       task = get_blob_task_id(temp);
       frame_num = get_blob_frame_seq(temp);
 
-      if(net_para->type[ftp_para->fused_layers-1] == CONV_LAYER){
+      if(net_para->type[ftp_para->from_layer+ftp_para->fused_layers-1] == CONV_LAYER){
          tile_region tmp = relative_offsets(ftp_para->input_tiles[task][ftp_para->fused_layers-1], 
                                        ftp_para->output_tiles[task][ftp_para->fused_layers-1]);  
          cropped_output = crop_feature_maps((float*)temp->data, 
                       ftp_para->input_tiles[task][ftp_para->fused_layers-1].w, 
                       ftp_para->input_tiles[task][ftp_para->fused_layers-1].h, 
-                      net_para->output_maps[ftp_para->fused_layers-1].c, 
+                      net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c, 
                       tmp.w1, tmp.w2, tmp.h1, tmp.h2);
       }else{cropped_output = (float*)temp->data;}
 
       stitch_feature_maps(cropped_output, stage_out, 
-                          net_para->output_maps[ftp_para->fused_layers-1].w, 
-                          net_para->output_maps[ftp_para->fused_layers-1].h, 
-                          net_para->output_maps[ftp_para->fused_layers-1].c, 
+                          net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w, 
+                          net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h, 
+                          net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c, 
                           ftp_para->output_tiles[task][ftp_para->fused_layers-1].w1, 
                           ftp_para->output_tiles[task][ftp_para->fused_layers-1].w2,
                           ftp_para->output_tiles[task][ftp_para->fused_layers-1].h1, 
                           ftp_para->output_tiles[task][ftp_para->fused_layers-1].h2);
 
-      if(net_para->type[ftp_para->fused_layers-1] == CONV_LAYER){free(cropped_output);}
+      if(net_para->type[ftp_para->from_layer+ftp_para->fused_layers-1] == CONV_LAYER){free(cropped_output);}
 
       free_blob(temp);
    }
 
    temp = new_blob_and_copy_data(cli_id, stage_out_size, (uint8_t*)stage_out);
    free(stage_out);
-   annotate_blob(temp, cli_id, frame_num, task);
+   annotate_blob(temp, cli_id, frame_num, task, model->cur_sp+1);
    return temp;
 }
 
