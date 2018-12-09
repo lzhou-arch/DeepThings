@@ -16,16 +16,18 @@
 #define DEBUG_FTP 0
 #define DEBUG_SERIALIZATION 0
 #define DEBUG_DEEP_GATEWAY 0
-#define DEBUG_DEEP_EDGE 1
-#define DEBUG_REQUEST 1
+#define DEBUG_DEEP_EDGE 0
+#define DEBUG_REQUEST 0
 
 /*Print timing and communication size information*/
 #define DEBUG_TIMING 1
-#define DEBUG_COMMU_SIZE 0
+#define DEBUG_COMMU_SIZE 1
 
 /*Configuration parameters for DistrIoT*/
-#define GATEWAY_PUBLIC_ADDR "192.168.1.9"
-#define GATEWAY_LOCAL_ADDR "192.168.1.9"
+#define GATEWAY_PUBLIC_ADDR "192.168.1.12"
+#define GATEWAY_LOCAL_ADDR "192.168.1.12"
+//#define EDGE_ADDR_LIST    {"192.168.1.9"}
+//#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10"}
 #define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11"}
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12"}
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12", "192.168.1.13", "192.168.1.14"}

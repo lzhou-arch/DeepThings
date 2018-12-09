@@ -100,8 +100,9 @@ static inline void process_task(device_ctxt* ctxt, blob* temp, bool is_reuse){
    cnn_model* model = (cnn_model*)(ctxt->model);
    blob* result;
    set_model_input(model, (float*)temp->data);
-   //int32_t cur_sp = get_blob_sp_id(temp);
-   //set_model_ftp_sp(model, cur_sp);
+   // update the ftp para for incoming tasks
+   int32_t cur_sp = get_blob_sp_id(temp);
+   set_model_ftp_para(model, cur_sp);
    forward_partition(model, get_blob_task_id(temp), is_reuse);  
    result = new_blob_and_copy_data(0, 
               get_model_byte_size(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1), 

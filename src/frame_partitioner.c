@@ -13,7 +13,6 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
    for(i = 0; i < model->ftp_para->partitions_h; i++){
       for(j = 0; j < model->ftp_para->partitions_w; j++){
          task = model->ftp_para->task_id[i][j];
-         fprintf(stderr, "partition task %d..\n", task);
          dw1 = model->ftp_para->input_tiles[task][0].w1;
          dw2 = model->ftp_para->input_tiles[task][0].w2;
          dh1 = model->ftp_para->input_tiles[task][0].h1;
@@ -23,12 +22,10 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
                                   net_para->input_maps[model->ftp_para->from_layer].h,
                                   net_para->input_maps[model->ftp_para->from_layer].c, 
                                   dw1, dw2, dh1, dh2);
-       fprintf(stderr, "2..\n");
          data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[model->ftp_para->from_layer].c;
          temp = new_blob_and_copy_data((int32_t)task, data_size, (uint8_t*)data);
          free(data);
          annotate_blob(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp);
-       fprintf(stderr, "3..\n");
          enqueue(ctxt->task_queue, temp);
          free_blob(temp);
          printf("Task %u, size: %u\n", task, data_size); 

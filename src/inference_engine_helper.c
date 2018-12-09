@@ -82,7 +82,7 @@ void stitch_feature_maps(float* input, float* output, uint32_t w, uint32_t h, ui
    }
 }
 
-void set_model_ftp_sp(cnn_model* model, uint32_t i) {
+void set_model_ftp_para(cnn_model* model, uint32_t i) {
   model->ftp_para = model->ftp_para_list[i];
 }
 
