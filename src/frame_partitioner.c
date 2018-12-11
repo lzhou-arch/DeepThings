@@ -31,13 +31,14 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
          printf("Task %u, size: %u\n", task, data_size); 
       }
    }
-#if DATA_REUSE
 
+#if DATA_REUSE
 
    for(i = 0; i < model->ftp_para_reuse->partitions_h; i++){
       for(j = 0; j < model->ftp_para_reuse->partitions_w; j++){
          task = model->ftp_para_reuse->task_id[i][j];
          if(model->ftp_para_reuse->schedule[task] == 1){
+            // moved to later part of queue
             remove_by_id(ctxt->task_queue, task);
             /*Enqueue original size for rollback execution if adjacent partition is not ready... ...*/
             dw1 = model->ftp_para->input_tiles[task][0].w1;
@@ -45,39 +46,42 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
             dh1 = model->ftp_para->input_tiles[task][0].h1;
             dh2 = model->ftp_para->input_tiles[task][0].h2;
             data = crop_feature_maps(get_model_input(model), 
-                                  net_para->input_maps[0].w, 
-                                  net_para->input_maps[0].h,
-                                  net_para->input_maps[0].c, 
+                                  net_para->input_maps[model->ftp_para_reuse->from_layer].w, 
+                                  net_para->input_maps[model->ftp_para_reuse->from_layer].h,
+                                  net_para->input_maps[model->ftp_para_reuse->from_layer].c, 
                                   dw1, dw2, dh1, dh2);
-            data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[0].c;
+            data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[model->ftp_para_reuse->from_layer].c;
             temp = new_blob_and_copy_data((int32_t)task, data_size, (uint8_t*)data);
             free(data);
-            annotate_blob(temp, get_this_client_id(ctxt), frame_num, task);
+            annotate_blob(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp);
             enqueue(ctxt->task_queue, temp);
             free_blob(temp);
         }
       }
    }
 
-
-   ftp_parameters_reuse* ftp_para_reuse = model->ftp_para_reuse;
-   clean_coverage(ftp_para_reuse);
-   for(i = 0; i < ftp_para_reuse->partitions_h; i++){
-      for(j = 0; j < ftp_para_reuse->partitions_w; j++){
-         task = ftp_para_reuse->task_id[i][j];
-         if(ftp_para_reuse->schedule[task] == 1){
-            dw1 = ftp_para_reuse->input_tiles[task][0].w1;
-            dw2 = ftp_para_reuse->input_tiles[task][0].w2;
-            dh1 = ftp_para_reuse->input_tiles[task][0].h1;
-            dh2 = ftp_para_reuse->input_tiles[task][0].h2;
-            ftp_para_reuse->shrinked_input[task] = 
+   clean_coverage(model->ftp_para_reuse);
+   for(i = 0; i < model->ftp_para_reuse->partitions_h; i++){
+      for(j = 0; j < model->ftp_para_reuse->partitions_w; j++){
+         task = model->ftp_para_reuse->task_id[i][j];
+         if(model->ftp_para_reuse->schedule[task] == 1){
+            dw1 = model->ftp_para_reuse->input_tiles[task][0].w1;
+            dw2 = model->ftp_para_reuse->input_tiles[task][0].w2;
+            dh1 = model->ftp_para_reuse->input_tiles[task][0].h1;
+            dh2 = model->ftp_para_reuse->input_tiles[task][0].h2;
+            // extra storage
+            model->ftp_para_reuse->shrinked_input[task] = 
                                   crop_feature_maps(get_model_input(model), 
-                                  net_para->input_maps[0].w, 
-                                  net_para->input_maps[0].h,
-                                  net_para->input_maps[0].c, 
+                                  net_para->input_maps[model->ftp_para_reuse->from_layer].w, 
+                                  net_para->input_maps[model->ftp_para_reuse->from_layer].h,
+                                  net_para->input_maps[model->ftp_para_reuse->from_layer].c, 
                                   dw1, dw2, dh1, dh2);
-            ftp_para_reuse->shrinked_input_size[task] = 
-                          sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[0].c;
+            model->ftp_para_reuse->shrinked_input_size[task] = 
+                          sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[model->ftp_para_reuse->from_layer].c;
+
+#if DEBUG_FTP
+            fprintf(stderr, "ck task id %d: dw1 %d, dw2 %d, dh1 %d, dh2 %d, f %u, size %d\n", task, dw1, dw2, dh1, dh2, model->ftp_para_reuse->from_layer, sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[model->ftp_para_reuse->from_layer].c);
+#endif
          }
       }
    }

@@ -135,6 +135,7 @@ void* steal_gateway(void* srv_conn, void *arg){
       char ip_addr[ADDRSTRLEN]="empty";
       temp = new_blob_and_copy_data(-1, ADDRSTRLEN, (uint8_t*)ip_addr);
    }else{
+      // round-robin
       enqueue(ctxt->registration_list, temp);
    }
    send_data(temp, conn);

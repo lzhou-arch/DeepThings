@@ -2,6 +2,11 @@
 #include <stdio.h>
 blob* new_blob_and_copy_data(int32_t id, uint32_t size, uint8_t* data)
 {
+  //if (data == NULL) {
+  //  fprintf(stderr, "null data...\n");
+  //  exit(-1);
+  //}
+
    blob *temp = (blob*)malloc(sizeof(blob));
    temp->data = (uint8_t*)malloc(sizeof(uint8_t)*size);
    temp->meta = NULL;

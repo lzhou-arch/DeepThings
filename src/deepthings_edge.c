@@ -23,7 +23,11 @@ device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uin
    // set to fisrt sp
    model->ftp_para = model->ftp_para_list[0];
 #if DATA_REUSE
-   model->ftp_para_reuse = preform_ftp_reuse(model->net_para, model->ftp_para);
+   model->ftp_para_reuse_list = (ftp_parameters_reuse**)malloc(sizeof(ftp_parameters_reuse*)*num_sp);
+   for (int i = 0; i < num_sp; i++) {
+     model->ftp_para_reuse_list[i] = preform_ftp_reuse(model->net_para, model->ftp_para_list[i]);
+   }
+   model->ftp_para_reuse = model->ftp_para_reuse_list[0];
 #endif
    ctxt->model = model;
    set_is_gateway(ctxt, 0);
@@ -164,6 +168,9 @@ void partition_frame_and_perform_inference_thread(void *arg){
         // set model ftp para 
         model->cur_sp = i;
         model->ftp_para = model->ftp_para_list[model->cur_sp];
+#if DATA_REUSE
+        model->ftp_para_reuse = model->ftp_para_reuse_list[model->cur_sp];
+#endif
         ctxt->batch_size = ctxt->batch_size_list[model->cur_sp];
 
         fprintf(stderr, "Temp results are ready at sp %u ...\n", model->cur_sp);
@@ -186,12 +193,16 @@ void partition_frame_and_perform_inference_thread(void *arg){
 #if DATA_REUSE
            data_ready = is_reuse_ready(model->ftp_para_reuse, get_blob_task_id(temp));
            if((model->ftp_para_reuse->schedule[get_blob_task_id(temp)] == 1) && data_ready) {
+              printf("AAAAAAAA\n");
               blob* shrinked_temp = new_blob_and_copy_data(get_blob_task_id(temp), 
                          (model->ftp_para_reuse->shrinked_input_size[get_blob_task_id(temp)]),
                          (uint8_t*)(model->ftp_para_reuse->shrinked_input[get_blob_task_id(temp)]));
+              printf("AA>??\n");
               copy_blob_meta(shrinked_temp, temp);
               free_blob(temp);
               temp = shrinked_temp;
+
+              printf("BBB\n");
 
               reuse_data_is_required = check_missing_coverage(model, get_blob_task_id(temp), get_blob_frame_seq(temp));
 #if DEBUG_DEEP_EDGE

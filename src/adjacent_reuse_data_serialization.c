@@ -132,7 +132,7 @@ blob* adjacent_reuse_data_serialization(device_ctxt* ctxt, uint32_t task_id, uin
    reuse_data = reuse_data - size;
    size = (size) * sizeof(float);
    blob* temp = new_blob_and_copy_data((int32_t)task_id, size, (uint8_t*)reuse_data);
-   annotate_blob(temp, get_this_client_id(ctxt), frame_num, task_id);
+   annotate_blob(temp, get_this_client_id(ctxt), frame_num, task_id, model->cur_sp);
    free(reuse_data);
    free(adjacent_id);
    return temp;

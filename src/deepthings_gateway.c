@@ -16,6 +16,7 @@ device_ctxt* deepthings_gateway_init(uint32_t num_sp, uint32_t* N, uint32_t* M, 
    device_ctxt* ctxt = init_gateway(total_edge_number, addr_list);
    // only need to load weights from [last_from_layer+last_fused_layer, n)
    cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1], -1);
+   //cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1]+1, from_layers[num_sp-1]+fused_layers[num_sp-1]+2); // TODO(lizhou): temp disabled.
    model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
    for (int i = 0; i < num_sp; i++) {
      model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);
@@ -24,7 +25,13 @@ device_ctxt* deepthings_gateway_init(uint32_t num_sp, uint32_t* N, uint32_t* M, 
    // set to last sp
    model->ftp_para = model->ftp_para_list[num_sp-1];
 #if DATA_REUSE
-   model->ftp_para_reuse = preform_ftp_reuse(model->net_para, model->ftp_para);
+   model->ftp_para_reuse_list = (ftp_parameters_reuse**)malloc(sizeof(ftp_parameters_reuse*)*num_sp);
+   for (int i = 0; i < num_sp; i++) {
+     model->ftp_para_reuse_list[i] = preform_ftp_reuse(model->net_para, model->ftp_para_list[i]);
+   }
+   // set to last sp ?? 
+   //model->ftp_para_reuse = model->ftp_para_reuse_list[num_sp-1];
+   model->ftp_para_reuse = model->ftp_para_reuse_list[0];
 #endif
    ctxt->model = model;
    set_is_gateway(ctxt, 1);
@@ -177,6 +184,7 @@ void* recv_reuse_data_from_edge(void* srv_conn, void* arg){
 
    int32_t cli_id;
    int32_t task_id;
+   int32_t sp_id;
 
    char ip_addr[ADDRSTRLEN];
    int32_t processing_cli_id;
@@ -188,17 +196,25 @@ void* recv_reuse_data_from_edge(void* srv_conn, void* arg){
    blob* temp = recv_data(conn);
    cli_id = get_blob_cli_id(temp);
    task_id = get_blob_task_id(temp);
+   sp_id = get_blob_sp_id(temp);
 #if DEBUG_COMMU_SIZE
    commu_size = commu_size + temp->size;
 #endif
 
 #if DEBUG_DEEP_GATEWAY
-   printf("Overlapped data for client %d, task %d is collected from %d: %s, size is %d\n", cli_id, task_id, processing_cli_id, ip_addr, temp->size);
+   printf("Overlapped data for client %d, task %d at sp %d is collected from %d: %s, size is %d\n", cli_id, task_id, sp_id, processing_cli_id, ip_addr, temp->size);
 #endif
+
+   // set the correct sp ftp_para_reuse
+   gateway_model->ftp_para_reuse = gateway_model->ftp_para_reuse_list[sp_id];
+
    if(overlapped_data_pool[cli_id][task_id] != NULL)
       free_self_overlapped_tile_data(gateway_model,  overlapped_data_pool[cli_id][task_id]);
+
+   printf("AAAAAA\n");
    overlapped_data_pool[cli_id][task_id] = self_reuse_data_deserialization(gateway_model, task_id, (float*)temp->data, get_blob_frame_seq(temp));
 
+   printf("BBB\n");
    if(processing_cli_id != cli_id) notify_coverage((device_ctxt*)arg, temp, cli_id);
    free_blob(temp);
 

@@ -65,17 +65,31 @@ static tile_region traversal(network_parameters* net_para, tile_region output, u
    }
    input.w = input.w2 -input.w1 + 1;
    input.h = input.h2 -input.h1 + 1;
+
+#if DEBUG_MULTI_FTP
+   fprintf(stderr, " w1 %d, w2 %d, h1 %d, h2 %d, w %d, h %d\n", input.w1, input.w2, input.h1, input.h2, input.w, input.h);
+   if (input.w < 0 || input.h < 0) {
+     fprintf(stderr, "Error: negative input width/height..\n");
+     exit(-1);
+   }
+#endif
    return input;
 }
 
 ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_t fused_layers, network_parameters* net_para){
+#if DEBUG_MULTI_FTP
   fprintf(stderr, "Perform ftp from [%d, %d)\n", from_layer, from_layer + fused_layers);
+#endif
+
    ftp_parameters* ftp_para = (ftp_parameters*)malloc(sizeof(ftp_parameters));
    ftp_para->partitions = N*M;
    ftp_para->partitions_h = N;
    ftp_para->partitions_w = M;
    ftp_para->from_layer = from_layer;
    ftp_para->fused_layers = fused_layers;
+
+   //fprintf(stderr, "ftp_para: from_layer %d, fused_layers %d\n", from_layer, fused_layers);
+
    int32_t i, j, l;
    int32_t id = 0;
    for(i = 0; i < ftp_para->partitions_h; i++){
@@ -87,8 +101,14 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_
    grid(net_para, ftp_para, M, N);
    for(i = 0; i < ftp_para->partitions_h; i++){
       for(j = 0; j < ftp_para->partitions_w; j++){
+#if DEBUG_MULTI_FTP
+        fprintf(stderr, "FTP for task %d:\n", ftp_para->task_id[i][j]);
+#endif
         // offset: from_layer
          for(l = from_layer+fused_layers-1; l >= (int32_t) from_layer; l--){
+#if DEBUG_MULTI_FTP
+            fprintf(stderr, " layer %d:\t", l);
+#endif
             ftp_para->input_tiles[ftp_para->task_id[i][j]][l-from_layer] = 
                        traversal(net_para, ftp_para->output_tiles[ftp_para->task_id[i][j]][l-from_layer], l);
             if(l>from_layer) ftp_para->output_tiles[ftp_para->task_id[i][j]][l-from_layer-1] 
@@ -141,7 +161,8 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
       overlapped_region.right_region.h = overlapped_region.right_region.h2 - overlapped_region.right_region.h1 + 1;
       ftp_para_reuse->output_reuse_regions[adjacent_task][l] = overlapped_region;
 #if DEBUG_FTP
-      printf("---(layer %3d), left---\n", l);
+      //printf("---(layer %3d), left---\n", l);
+      printf("---(layer %3d), left---\n", l+ftp_para_reuse+1);
       print_tile_region(overlapped_region.right_region);
 #endif
    }
@@ -159,7 +180,8 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
       overlapped_region.down_region.h = overlapped_region.down_region.h2 - overlapped_region.down_region.h1 + 1;
       ftp_para_reuse->output_reuse_regions[adjacent_task][l] = overlapped_region;
 #if DEBUG_FTP
-      printf("---(layer %3d), above---\n", l);
+      //printf("---(layer %3d), above---\n", l);
+      printf("---(layer %3d), above---\n", l+ftp_para_reuse+1);
       print_tile_region(overlapped_region.down_region);
 #endif
    }
@@ -177,7 +199,8 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
       overlapped_region.left_region.h = overlapped_region.left_region.h2 - overlapped_region.left_region.h1 + 1;
       ftp_para_reuse->output_reuse_regions[adjacent_task][l] = overlapped_region;
 #if DEBUG_FTP
-      printf("---(layer %3d), right---\n", l);
+      //printf("---(layer %3d), right---\n", l);
+      printf("---(layer %3d), right---\n", l+ftp_para_reuse+1);
       print_tile_region(overlapped_region.left_region);
 #endif
    }
@@ -195,12 +218,30 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
       overlapped_region.up_region.h = overlapped_region.up_region.h2 - overlapped_region.up_region.h1 + 1;
       ftp_para_reuse->output_reuse_regions[adjacent_task][l] = overlapped_region;
 #if DEBUG_FTP
-      printf("---(layer %3d), below---\n", l);
+      //printf("---(layer %3d), below---\n", l);
+      printf("---(layer %3d), below---\n", l+ftp_para_reuse+1);
       print_tile_region(overlapped_region.up_region);
 #endif
    }
    remaining_region.w = remaining_region.w2 - remaining_region.w1 + 1;
    remaining_region.h = remaining_region.h2 - remaining_region.h1 + 1;
+
+  if (remaining_region.w <= 0) {
+    // when the fused layer is deep, it is possible that adjacent tasks overlap
+#if DEBUG_MULTI_FTP
+    fprintf(stderr, "Warning: too deep fused layers causing fully overlap w...\n");
+#endif
+    remaining_region.w2 = remaining_region.w1; 
+    remaining_region.w = 1;
+  }
+  if (remaining_region.h <= 0) {
+#if DEBUG_MULTI_FTP
+     fprintf(stderr, "Warning: too deep fused layers causing fully overlap h...\n");
+#endif
+    remaining_region.h2 = remaining_region.h1; 
+    remaining_region.h = 1;
+  }
+
    return remaining_region;
 }
 
@@ -245,7 +286,7 @@ void calculate_reuse_data_size(ftp_parameters_reuse* ftp_para_reuse, network_par
          regions_and_data = ftp_para_reuse->output_reuse_regions[adjacent_id[position]][l];
          overlap_index = get_region(&regions_and_data, mirror_position);
          if((overlap_index.w>0)&&(overlap_index.h>0))
-            ftp_para_reuse->adjacent_reuse_data_size[task_id] += sizeof(float)*overlap_index.w*overlap_index.h*net_para->output_maps[l].c;
+            ftp_para_reuse->adjacent_reuse_data_size[task_id] += sizeof(float)*overlap_index.w*overlap_index.h*net_para->output_maps[l+ftp_para_reuse->from_layer].c;
       }
    }
 
@@ -255,9 +296,13 @@ void calculate_reuse_data_size(ftp_parameters_reuse* ftp_para_reuse, network_par
          regions_and_data = ftp_para_reuse->output_reuse_regions[task_id][l];
          overlap_index = get_region(&regions_and_data, position);
          if((overlap_index.w>0)&&(overlap_index.h>0))
-            ftp_para_reuse->self_reuse_data_size[task_id] += sizeof(float)*overlap_index.w*overlap_index.h*net_para->output_maps[l].c;
+            ftp_para_reuse->self_reuse_data_size[task_id] += sizeof(float)*overlap_index.w*overlap_index.h*net_para->output_maps[l+ftp_para_reuse->from_layer].c;
       }
    }
+#if DEBUG_FTP
+   printf("adjacent_reuse_data_size for task %d: %u\n", task_id, ftp_para_reuse->adjacent_reuse_data_size[task_id]);
+   printf("self_reuse_data_size for task %d: %u\n", task_id, ftp_para_reuse->self_reuse_data_size[task_id]);
+#endif
 }
 
 
@@ -270,6 +315,7 @@ ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parame
    ftp_para_reuse->partitions = ftp_para->partitions;
    ftp_para_reuse->partitions_h = ftp_para->partitions_h;
    ftp_para_reuse->partitions_w = ftp_para->partitions_w;
+   ftp_para_reuse->from_layer = ftp_para->from_layer;
    ftp_para_reuse->fused_layers = ftp_para->fused_layers;
    for(i = 0; i < ftp_para_reuse->partitions_h; i++){
       for(j = 0; j < ftp_para_reuse->partitions_w; j++){
@@ -324,21 +370,29 @@ ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parame
    for(i = 0; i < ftp_para_reuse->partitions_h; i++){
       for(j = 0; j < ftp_para_reuse->partitions_w; j++){
 #if DEBUG_FTP
-         printf("------------------(%3d,%3d)----------------\n", i, j);
+         printf("----(%3d,%3d)----\n", i, j);
 #endif
-         for(l = ftp_para_reuse->fused_layers-1; l >= 0; l--){
-            task = ftp_para_reuse->task_id[i][j];
+        task = ftp_para_reuse->task_id[i][j];
+#if DEBUG_MULTI_FTP
+        if(ftp_para_reuse->schedule[task] == 1)
+          fprintf(stderr, "FTP_REUSE for task %d:\n", task);
+#endif
+
+         // offset: from_layer
+         for(l = ftp_para_reuse->from_layer+ftp_para_reuse->fused_layers-1; l >= (int32_t) ftp_para_reuse->from_layer; l--){
             if(ftp_para_reuse->schedule[task] == 1){
-               ftp_para_reuse->input_tiles[ftp_para_reuse->task_id[i][j]][l] = 
-                       traversal(net_para, ftp_para_reuse->output_tiles[ftp_para_reuse->task_id[i][j]][l], l);
-               if(l>0) ftp_para_reuse->output_tiles[ftp_para_reuse->task_id[i][j]][l-1] 
-                         = remove_and_record_overlapped_region_at_output(i, j, l-1,  ftp_para_reuse, 
-                                                      ftp_para_reuse->input_tiles[ftp_para_reuse->task_id[i][j]][l]);
+#if DEBUG_MULTI_FTP
+              fprintf(stderr, " layer %d:\t", l);
+#endif
+               ftp_para_reuse->input_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer] = 
+                       traversal(net_para, ftp_para_reuse->output_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer], l);
+               if(l>ftp_para_reuse->from_layer) 
+                 ftp_para_reuse->output_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer-1] = remove_and_record_overlapped_region_at_output(i, j, l-ftp_para_reuse->from_layer-1,  ftp_para_reuse, ftp_para_reuse->input_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer]);
             }
 #if DEBUG_FTP
             printf("---(layer %3d)---\n", l);
-            print_tile_region(ftp_para_reuse->output_tiles[ftp_para->task_id[i][j]][l]);
-            print_tile_region(ftp_para_reuse->input_tiles[ftp_para->task_id[i][j]][l]);
+            print_tile_region(ftp_para_reuse->output_tiles[ftp_para->task_id[i][j]][l-ftp_para_reuse->from_layer]);
+            print_tile_region(ftp_para_reuse->input_tiles[ftp_para->task_id[i][j]][l-ftp_para_reuse->from_layer]);
             printf("---(layer %3d)---\n", l);
 #endif
          }

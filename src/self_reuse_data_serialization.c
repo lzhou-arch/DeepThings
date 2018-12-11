@@ -20,7 +20,7 @@ blob* self_reuse_data_serialization(device_ctxt* ctxt, uint32_t task_id, uint32_
          regions_and_data = ftp_para_reuse->output_reuse_regions[task_id][l];
          overlap_index = get_region(&regions_and_data, position);
          if((overlap_index.w>0)&&(overlap_index.h>0)){
-            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l].c;
+            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l+ftp_para_reuse->from_layer].c;
 #if DEBUG_SERIALIZATION
             if(position==0) printf("Self below overlapped amount is %d \n",amount_of_element);
             if(position==1) printf("Self right overlapped amount is %d \n",amount_of_element);
@@ -37,7 +37,7 @@ blob* self_reuse_data_serialization(device_ctxt* ctxt, uint32_t task_id, uint32_
    reuse_data = reuse_data - size;
    size = (size) * sizeof(float);
    blob* temp = new_blob_and_copy_data((int32_t)task_id, size, (uint8_t*)reuse_data);
-   annotate_blob(temp, get_this_client_id(ctxt), frame_num, task_id);
+   annotate_blob(temp, get_this_client_id(ctxt), frame_num, task_id, model->cur_sp);
    free(reuse_data);
    free(adjacent_id);
    return temp;
@@ -62,7 +62,7 @@ overlapped_tile_data* self_reuse_data_deserialization(cnn_model* model, uint32_t
          overlapped_tile_data original = ftp_para_reuse->output_reuse_regions[task_id][l];
          overlap_index = get_region(&original, position);
          if((overlap_index.w>0)&&(overlap_index.h>0)){
-            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l].c;
+            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l+ftp_para_reuse->from_layer].c;
 #if DEBUG_SERIALIZATION
             if(position==0) printf("Self below overlapped amount is %d \n",amount_of_element);
             if(position==1) printf("Self right overlapped amount is %d \n",amount_of_element);

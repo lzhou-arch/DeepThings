@@ -61,6 +61,7 @@ typedef struct def_ftp_parameters_reuse{
    uint32_t partitions;
    uint32_t partitions_w;
    uint32_t partitions_h;
+   uint32_t from_layer;
    uint32_t fused_layers;
    uint32_t task_id[PARTITIONS_H_MAX][PARTITIONS_W_MAX];
    uint32_t schedule[PARTITIONS_MAX];

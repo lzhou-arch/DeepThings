@@ -30,7 +30,7 @@ int main(int argc, char **argv){
    uint32_t this_cli_id = 0;
 
    // set the num of split points
-   uint32_t num_sp = get_int_arg(argc, argv, "-sp", 2);
+   uint32_t num_sp = get_int_arg(argc, argv, "-sp", 1);
    uint32_t* partitions_h = (uint32_t*)malloc(sizeof(uint32_t) * num_sp);
    uint32_t* partitions_w = (uint32_t*)malloc(sizeof(uint32_t) * num_sp);
    uint32_t* from_layers = (uint32_t*)malloc(sizeof(uint32_t) * num_sp);
@@ -39,7 +39,7 @@ int main(int argc, char **argv){
    partitions_h[0] = get_int_arg(argc, argv, "-n1", 4);
    partitions_w[0] = get_int_arg(argc, argv, "-m1", 4);
    from_layers[0] = get_int_arg(argc, argv, "-f1", 0);
-   fused_layers[0] = get_int_arg(argc, argv, "-l1", 8);
+   fused_layers[0] = get_int_arg(argc, argv, "-l1", 16);
 
    partitions_h[1] = get_int_arg(argc, argv, "-n2", 4);
    partitions_w[1] = get_int_arg(argc, argv, "-m2", 4);
@@ -51,10 +51,10 @@ int main(int argc, char **argv){
    from_layers[2] = get_int_arg(argc, argv, "-f3", 8);
    fused_layers[2] = get_int_arg(argc, argv, "-l3", 16);
 
-   partitions_h[3] = get_int_arg(argc, argv, "-n4", 4);
-   partitions_w[3] = get_int_arg(argc, argv, "-m4", 4);
-   from_layers[3] = get_int_arg(argc, argv, "-f4", 8);
-   fused_layers[3] = get_int_arg(argc, argv, "-l4", 16);
+   //partitions_h[3] = get_int_arg(argc, argv, "-n4", 4);
+   //partitions_w[3] = get_int_arg(argc, argv, "-m4", 4);
+   //from_layers[3] = get_int_arg(argc, argv, "-f4", 8);
+   //fused_layers[3] = get_int_arg(argc, argv, "-l4", 16);
 
    for(uint32_t i=0; i<num_sp; i++) {
     fprintf(stderr, "Split points %lu: [%lu, %lu)\n", i, from_layers[i], from_layers[i] + fused_layers[i]); 
@@ -65,11 +65,11 @@ int main(int argc, char **argv){
    //char network_file[30] = "models/alexnet.cfg";
    //char weight_file[30] = "models/alexnet.weights";
    // medium
-   //char network_file[30] = "models/yolo.cfg";
-   //char weight_file[30] = "models/yolo.weights";
+   char network_file[30] = "models/yolo.cfg";
+   char weight_file[30] = "models/yolo.weights";
    // large
-   char network_file[30] = "models/vgg-16.cfg";
-   char weight_file[30] = "models/vgg-16.weights";
+   //char network_file[30] = "models/vgg-16.cfg";
+   //char weight_file[30] = "models/vgg-16.weights";
 
    if(0 == strcmp(get_string_arg(argc, argv, "-mode", "none"), "start")){  
       printf("start\n");
