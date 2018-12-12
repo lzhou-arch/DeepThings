@@ -15,8 +15,8 @@ static double commu_size;
 device_ctxt* deepthings_gateway_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t total_edge_number, const char** addr_list){
    device_ctxt* ctxt = init_gateway(total_edge_number, addr_list);
    // only need to load weights from [last_from_layer+last_fused_layer, n)
-   cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1], -1);
-   //cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1]+1, from_layers[num_sp-1]+fused_layers[num_sp-1]+2); // TODO(lizhou): temp disabled.
+   //cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1], -1);
+   cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1]+1, from_layers[num_sp-1]+fused_layers[num_sp-1]+2); // TODO(lizhou): temp disabled.
    model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
    for (int i = 0; i < num_sp; i++) {
      model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);

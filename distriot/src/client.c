@@ -106,7 +106,7 @@ void send_result_thread(void *arg){
 #endif
    while(1){
       temp = dequeue(ctxt->result_queue);
-      // debug
+      // TODO(lizhou): fix the static ip
       char local_addr[ADDR_LEN];
       strcpy(local_addr, "192.168.1.9");
 

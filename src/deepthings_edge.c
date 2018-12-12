@@ -54,10 +54,19 @@ void send_reuse_data(device_ctxt* ctxt, blob* task_input_blob){
    service_conn* conn;
 
    blob* temp  = self_reuse_data_serialization(ctxt, get_blob_task_id(task_input_blob), get_blob_frame_seq(task_input_blob));
-   conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
+   // TODO(lizhou): fix the static ip
+   char local_addr[ADDR_LEN];
+   strcpy(local_addr, "192.168.1.9");
+   if(get_blob_sp_id(task_input_blob) == ctxt->num_sp-1) {
+     fprintf(stderr, "Send reuse data to gateway ...\n");
+     conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
+   } else {
+     fprintf(stderr, "Send reuse data to local ...\n");
+     conn = connect_service(TCP, local_addr, WORK_STEAL_PORT);  // use the same port w/ steal
+   }
    send_request("reuse_data", 20, conn);
 #if DEBUG_DEEP_EDGE
-   printf("send self reuse data for task %d:%d \n", get_blob_cli_id(task_input_blob), get_blob_task_id(task_input_blob)); 
+   printf("send self reuse data for task %d:%d:%d \n", get_blob_cli_id(task_input_blob), get_blob_task_id(task_input_blob), get_blob_sp_id(task_input_blob)); 
 #endif
    copy_blob_meta(temp, task_input_blob);
    send_data(temp, conn);
@@ -67,12 +76,25 @@ void send_reuse_data(device_ctxt* ctxt, blob* task_input_blob){
 
 void request_reuse_data(device_ctxt* ctxt, blob* task_input_blob, bool* reuse_data_is_required){
    cnn_model* model = (cnn_model*)(ctxt->model);
+   // update the ftp para reuse for requested reuse data
+   int32_t cur_sp = get_blob_sp_id(task_input_blob);
+   set_model_ftp_para_reuse(model, cur_sp);
    /*if task doesn't require any reuse_data*/
    if(model->ftp_para_reuse->schedule[get_blob_task_id(task_input_blob)] == 0) return;/*Task without any dependency*/
    if(!need_reuse_data_from_gateway(reuse_data_is_required)) return;/*Reuse data are all generated locally*/
 
    service_conn* conn;
-   conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
+   // TODO(lizhou): fix the static ip
+   char local_addr[ADDR_LEN];
+   strcpy(local_addr, "192.168.1.9");
+   //conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
+   if(cur_sp == ctxt->num_sp-1) {
+     fprintf(stderr, "Request reuse data from gateway ...\n");
+     conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
+   } else {
+     fprintf(stderr, "Request reuse data from locall ...\n");
+     conn = connect_service(TCP, local_addr, WORK_STEAL_PORT);  // use the same port w/ steal
+   }
    send_request("request_reuse_data", 20, conn);
    char data[20]="empty";
    blob* temp = new_blob_and_copy_data(get_blob_task_id(task_input_blob), 20, (uint8_t*)data);
@@ -107,6 +129,9 @@ static inline void process_task(device_ctxt* ctxt, blob* temp, bool is_reuse){
    // update the ftp para for incoming tasks
    int32_t cur_sp = get_blob_sp_id(temp);
    set_model_ftp_para(model, cur_sp);
+#if DATA_REUSE
+   set_model_ftp_para_reuse(model, cur_sp);
+#endif
    forward_partition(model, get_blob_task_id(temp), is_reuse);  
    result = new_blob_and_copy_data(0, 
               get_model_byte_size(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1), 
@@ -193,16 +218,12 @@ void partition_frame_and_perform_inference_thread(void *arg){
 #if DATA_REUSE
            data_ready = is_reuse_ready(model->ftp_para_reuse, get_blob_task_id(temp));
            if((model->ftp_para_reuse->schedule[get_blob_task_id(temp)] == 1) && data_ready) {
-              printf("AAAAAAAA\n");
               blob* shrinked_temp = new_blob_and_copy_data(get_blob_task_id(temp), 
                          (model->ftp_para_reuse->shrinked_input_size[get_blob_task_id(temp)]),
                          (uint8_t*)(model->ftp_para_reuse->shrinked_input[get_blob_task_id(temp)]));
-              printf("AA>??\n");
               copy_blob_meta(shrinked_temp, temp);
               free_blob(temp);
               temp = shrinked_temp;
-
-              printf("BBB\n");
 
               reuse_data_is_required = check_missing_coverage(model, get_blob_task_id(temp), get_blob_frame_seq(temp));
 #if DEBUG_DEEP_EDGE
@@ -442,6 +463,9 @@ void* steal_client_reuse_aware(void* srv_conn, void* arg){
 #endif
 
    uint32_t task_id = get_blob_task_id(temp);
+   // set ftp para reuse when requesting task
+   uint32_t sp_id = get_blob_sp_id(temp);
+   set_model_ftp_para_reuse(edge_model, sp_id);
    bool* reuse_data_is_required = (bool*)malloc(sizeof(bool)*4);
    uint32_t position;
    for(position = 0; position < 4; position++){
@@ -495,6 +519,128 @@ void* update_coverage(void* srv_conn, void* arg){
    free_blob(temp);
    return NULL;
 }
+
+void notify_coverage_by_ip(device_ctxt* ctxt, blob* task_input_blob, uint32_t cli_id, char* cli_addr){
+   char data[20]="empty";
+   blob* temp = new_blob_and_copy_data(cli_id, 20, (uint8_t*)data);
+   copy_blob_meta(temp, task_input_blob);
+   service_conn* conn;
+   conn = connect_service(TCP, cli_addr, WORK_STEAL_PORT);
+   send_request("update_coverage", 20, conn);
+   send_data(temp, conn);
+   free_blob(temp);
+   close_service_connection(conn);
+}
+
+static overlapped_tile_data* overlapped_data_pool_local[FUSED_POINTS_MAX][MAX_EDGE_NUM][PARTITIONS_MAX];
+
+void* recv_reuse_data_from_edge_local(void* srv_conn, void* arg){
+   printf("collecting_reuse_data ... ... \n");
+   service_conn *conn = (service_conn *)srv_conn;
+   cnn_model* gateway_model = (cnn_model*)(((device_ctxt*)(arg))->model);
+
+   int32_t cli_id;
+   int32_t task_id;
+   int32_t sp_id;
+
+   char ip_addr[ADDRSTRLEN];
+   int32_t processing_cli_id;
+   inet_ntop(conn->serv_addr_ptr->sin_family, &(conn->serv_addr_ptr->sin_addr), ip_addr, ADDRSTRLEN);
+   processing_cli_id = get_client_id(ip_addr, (device_ctxt*)arg);
+   if(processing_cli_id < 0)
+      printf("Client IP address unknown ... ...\n");
+
+   blob* temp = recv_data(conn);
+   cli_id = get_blob_cli_id(temp);
+   task_id = get_blob_task_id(temp);
+   sp_id = get_blob_sp_id(temp);
+#if DEBUG_COMMU_SIZE
+   commu_size = commu_size + temp->size;
+#endif
+
+#if DEBUG_DEEP_GATEWAY
+   printf("Overlapped data for client %d, task %d at sp %d is collected from %d: %s, size is %d\n", cli_id, task_id, sp_id, processing_cli_id, ip_addr, temp->size);
+#endif
+
+   // set the correct sp ftp_para_reuse
+   //gateway_model->ftp_para_reuse = gateway_model->ftp_para_reuse_list[sp_id];
+   if (gateway_model->cur_sp != sp_id) {
+     fprintf(stderr, "Error: fuse point doesn't match!\n");
+     exit(-1);
+   }
+
+   if(overlapped_data_pool_local[sp_id][cli_id][task_id] != NULL)
+      free_self_overlapped_tile_data(gateway_model,  overlapped_data_pool_local[sp_id][cli_id][task_id]);
+
+   overlapped_data_pool_local[sp_id][cli_id][task_id] = self_reuse_data_deserialization(gateway_model, task_id, (float*)temp->data, get_blob_frame_seq(temp));
+
+   // TODO(lizhou): record this cli ip addr
+   //if(processing_cli_id != cli_id) notify_coverage((device_ctxt*)arg, temp, cli_id);
+   if(processing_cli_id != cli_id) notify_coverage_by_ip((device_ctxt*)arg, temp, cli_id, "192.168.1.9");
+   free_blob(temp);
+
+   printf("JJJJ ... ...\n");
+
+   return NULL;
+}
+
+void* send_reuse_data_to_edge_local(void* srv_conn, void* arg){
+   printf("handing_out_reuse_data ... ... \n");
+   service_conn *conn = (service_conn *)srv_conn;
+   device_ctxt* ctxt = (device_ctxt*)arg;
+   cnn_model* gateway_model = (cnn_model*)(ctxt->model);
+
+   int32_t cli_id;
+   int32_t task_id;
+   int32_t sp_id;
+   uint32_t frame_num;
+   blob* temp = recv_data(conn);
+   cli_id = get_blob_cli_id(temp);
+   task_id = get_blob_task_id(temp);
+   sp_id = get_blob_sp_id(temp);
+
+   frame_num = get_blob_frame_seq(temp);
+   free_blob(temp);
+
+#if DEBUG_DEEP_GATEWAY
+   char ip_addr[ADDRSTRLEN];
+   int32_t processing_cli_id;
+   inet_ntop(conn->serv_addr_ptr->sin_family, &(conn->serv_addr_ptr->sin_addr), ip_addr, ADDRSTRLEN);
+   processing_cli_id = get_client_id(ip_addr, ctxt);
+   if(processing_cli_id < 0)
+      printf("Client IP address unknown ... ...\n");
+#endif
+
+   blob* reuse_info_blob = recv_data(conn);
+   bool* reuse_data_is_required = (bool*)(reuse_info_blob->data);
+
+#if DEBUG_DEEP_GATEWAY
+   printf("Overlapped data for client %d, task %d is required by %d: %s is \n", cli_id, task_id, processing_cli_id, ip_addr);
+   print_reuse_data_is_required(reuse_data_is_required);
+#endif
+   uint32_t position;
+   int32_t* adjacent_id = get_adjacent_task_id_list(gateway_model, task_id);
+
+   for(position = 0; position < 4; position++){
+      if(adjacent_id[position]==-1) continue;
+      if(reuse_data_is_required[position]){
+#if DEBUG_DEEP_GATEWAY
+         printf("place_self_deserialized_data for client %d, task %d, the adjacent task is %d\n", cli_id, task_id, adjacent_id[position]);
+#endif
+         place_self_deserialized_data(gateway_model, adjacent_id[position], overlapped_data_pool_local[sp_id][cli_id][adjacent_id[position]]);
+      }
+   }
+   free(adjacent_id);
+   temp = adjacent_reuse_data_serialization(ctxt, task_id, frame_num, reuse_data_is_required);
+   free_blob(reuse_info_blob);
+   send_data(temp, conn);
+#if DEBUG_COMMU_SIZE
+   commu_size = commu_size + temp->size;
+#endif
+   free_blob(temp);
+
+   return NULL;
+}
 #endif
 
 // TODO(lizhou)
@@ -509,15 +655,16 @@ void* update_coverage(void* srv_conn, void* arg){
 
 void deepthings_serve_stealing_thread(void *arg){
 #if DATA_REUSE
-   const char* request_types[]={"steal_client", "update_coverage"};
-   void* (*handlers[])(void*, void*) = {steal_client_reuse_aware, update_coverage};
+   const char* request_types[]={"steal_client", "update_coverage", "reuse_data", "request_reuse_data"};
+   void* (*handlers[])(void*, void*) = {steal_client_reuse_aware, update_coverage, recv_reuse_data_from_edge_local, send_reuse_data_to_edge_local};
 #else
    const char* request_types[]={"steal_client"};
    void* (*handlers[])(void*, void*) = {steal_client};
 #endif
    int wst_service = service_init(WORK_STEAL_PORT, TCP);
 #if DATA_REUSE
-   start_service(wst_service, TCP, request_types, 2, handlers, arg);
+   //start_service(wst_service, TCP, request_types, 2, handlers, arg);
+   start_service(wst_service, TCP, request_types, 4, handlers, arg);
 #else
    start_service(wst_service, TCP, request_types, 1, handlers, arg);
 #endif

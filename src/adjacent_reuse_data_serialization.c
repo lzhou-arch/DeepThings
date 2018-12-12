@@ -115,7 +115,7 @@ blob* adjacent_reuse_data_serialization(device_ctxt* ctxt, uint32_t task_id, uin
          regions_and_data = ftp_para_reuse->output_reuse_regions[adjacent_id[position]][l];
          overlap_index = get_region(&regions_and_data, mirror_position);
          if((overlap_index.w>0)&&(overlap_index.h>0)){
-            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l].c;
+            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l+ftp_para_reuse->from_layer].c;
 #if DEBUG_SERIALIZATION
             if(position==0) printf("Below overlapped amount is %d \n",amount_of_element);
             if(position==1) printf("Right overlapped amount is %d \n",amount_of_element);
@@ -169,7 +169,7 @@ overlapped_tile_data** adjacent_reuse_data_deserialization(cnn_model* model, uin
 */
          overlapped_tile_data* regions_and_data_ptr = regions_and_data_ptr_array[position];
          if((overlap_index.w>0)&&(overlap_index.h>0)){
-            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l].c;
+            uint32_t amount_of_element = overlap_index.w*overlap_index.h*net_para->output_maps[l+ftp_para_reuse->from_layer].c;
 #if DEBUG_SERIALIZATION
             if(position==0) printf("Below overlapped amount is %d \n",amount_of_element);
             if(position==1) printf("Right overlapped amount is %d \n",amount_of_element);

@@ -2,6 +2,7 @@
 #define CONFIGURE_H
 
 /*Partitioning paramters*/
+#define FUSED_POINTS_MAX 8
 #define FUSED_LAYERS_MAX 32
 #define PARTITIONS_W_MAX 6
 #define PARTITIONS_H_MAX 6
@@ -14,10 +15,10 @@
 /*Debugging information for different components*/
 #define DEBUG_INFERENCE 0
 #define DEBUG_FTP 0
-#define DEBUG_MULTI_FTP 1
+#define DEBUG_MULTI_FTP 0
 #define DEBUG_SERIALIZATION 0
-#define DEBUG_DEEP_GATEWAY 1
-#define DEBUG_DEEP_EDGE 1
+#define DEBUG_DEEP_GATEWAY 0
+#define DEBUG_DEEP_EDGE 0
 #define DEBUG_REQUEST 0
 
 /*Print timing and communication size information*/
@@ -25,8 +26,8 @@
 #define DEBUG_COMMU_SIZE 1
 
 /*Configuration parameters for DistrIoT*/
-#define GATEWAY_PUBLIC_ADDR "192.168.1.9"
-#define GATEWAY_LOCAL_ADDR "192.168.1.9"
+#define GATEWAY_PUBLIC_ADDR "192.168.1.12"
+#define GATEWAY_LOCAL_ADDR "192.168.1.12"
 //#define EDGE_ADDR_LIST    {"192.168.1.9"}
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10"}
 #define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11"}

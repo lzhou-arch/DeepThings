@@ -71,6 +71,9 @@ float* crop_feature_maps(float* input, uint32_t w, uint32_t h, uint32_t c, uint3
 void stitch_feature_maps(float* input, float* output, uint32_t w, uint32_t h, uint32_t c, uint32_t dw1, uint32_t dw2, uint32_t dh1, uint32_t dh2);
 
 void set_model_ftp_para(cnn_model* model, uint32_t i);
+#if DATA_REUSE
+void set_model_ftp_para_reuse(cnn_model* model, uint32_t i);
+#endif
 float* get_model_input(cnn_model* model);
 void set_model_input(cnn_model* model, float* input);
 float* get_model_output(cnn_model* model, uint32_t layer);
