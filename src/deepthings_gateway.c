@@ -51,6 +51,7 @@ device_ctxt* deepthings_gateway_init(uint32_t num_sp, uint32_t* N, uint32_t* M, 
 
 #if DATA_REUSE
 void notify_coverage(device_ctxt* ctxt, blob* task_input_blob, uint32_t cli_id){
+   printf("notify coverage..\n");
    char data[20]="empty";
    blob* temp = new_blob_and_copy_data(cli_id, 20, (uint8_t*)data);
    copy_blob_meta(temp, task_input_blob);
@@ -211,10 +212,8 @@ void* recv_reuse_data_from_edge(void* srv_conn, void* arg){
    if(overlapped_data_pool[cli_id][task_id] != NULL)
       free_self_overlapped_tile_data(gateway_model,  overlapped_data_pool[cli_id][task_id]);
 
-   printf("AAAAAA\n");
    overlapped_data_pool[cli_id][task_id] = self_reuse_data_deserialization(gateway_model, task_id, (float*)temp->data, get_blob_frame_seq(temp));
 
-   printf("BBB\n");
    if(processing_cli_id != cli_id) notify_coverage((device_ctxt*)arg, temp, cli_id);
    free_blob(temp);
 

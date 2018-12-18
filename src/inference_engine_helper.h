@@ -47,6 +47,7 @@ typedef struct cnn_model_wrapper{
    ftp_parameters** ftp_para_list;
    ftp_parameters* ftp_para; // current para in use
    network_parameters* net_para;
+   ftp_overhead** ftp_overhead_list; // store the introduced comp and comm overhead 
 #if DATA_REUSE
    ftp_parameters_reuse** ftp_para_reuse_list;
    ftp_parameters_reuse* ftp_para_reuse; // current reuse para in use
@@ -77,6 +78,7 @@ void set_model_ftp_para_reuse(cnn_model* model, uint32_t i);
 float* get_model_input(cnn_model* model);
 void set_model_input(cnn_model* model, float* input);
 float* get_model_output(cnn_model* model, uint32_t layer);
+void set_model_output(cnn_model* model, uint32_t layer, float* input);
 uint32_t get_model_byte_size(cnn_model* model, uint32_t layer);
 tile_region relative_offsets(tile_region large, tile_region small);
 

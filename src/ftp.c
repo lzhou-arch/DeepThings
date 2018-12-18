@@ -2,6 +2,8 @@
 #include "configure.h"
 #include "inference_engine_helper.h"
 
+#define LOCAL_FACTOR 1.5
+
 static inline void grid(network_parameters* net_para, ftp_parameters* ftp_para, uint32_t M, uint32_t N){
    int32_t w = net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w;
    int32_t h = net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h;
@@ -119,6 +121,79 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_
    return ftp_para;
 }
 
+ftp_overhead* partition_and_estimate(network_parameters* net_para, ftp_parameters* ftp_para){
+   uint32_t task;
+   uint32_t data_size;
+   uint32_t input_size = 0;
+   uint32_t dw1, dw2;
+   uint32_t dh1, dh2;
+   uint32_t i, j;
+   int32_t l;
+
+   printf("Task size:");
+   for(i = 0; i < ftp_para->partitions_h; i++){
+      for(j = 0; j < ftp_para->partitions_w; j++){
+         task = ftp_para->task_id[i][j];
+         dw1 = ftp_para->input_tiles[task][0].w1;
+         dw2 = ftp_para->input_tiles[task][0].w2;
+         dh1 = ftp_para->input_tiles[task][0].h1;
+         dh2 = ftp_para->input_tiles[task][0].h2;
+         data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[ftp_para->from_layer].c;
+         input_size += data_size;
+         printf(" %u", data_size); 
+      }
+   }
+   printf("\n");
+   data_size = sizeof(float)*net_para->input_maps[ftp_para->from_layer].w*net_para->input_maps[ftp_para->from_layer].h*net_para->input_maps[ftp_para->from_layer].c;
+   printf("Input data_size vs. original_data_size: %u/%u (+%f%)\n", input_size, data_size, (float)(input_size-data_size)/data_size); 
+
+   float comp_size;
+   float comp_size_layer;
+   float total_comp_size = 0;
+   float original_total_comp_size = 0;
+   uint32_t total_comm_size = 0;
+   float billion = 1000000000.;
+
+   // cal original computation in BFLOPs per layer
+   for(l = ftp_para->fused_layers-1; l >= 0; l--){
+     comp_size_layer = 0;
+     int32_t n = net_para->n[l+ftp_para->from_layer];
+     int32_t size = net_para->filter[l+ftp_para->from_layer];
+     int32_t c1 = net_para->input_maps[l+ftp_para->from_layer].c;
+     for(i = 0; i < ftp_para->partitions_h; i++){
+       for(j = 0; j < ftp_para->partitions_w; j++){
+         task = ftp_para->task_id[i][j];
+         // only count cnn
+         // TODO(lizhou): add comp overhead for max pooling
+         comp_size = ((2.0*n*size*size*c1)*(ftp_para->output_tiles[task][l].w*ftp_para->output_tiles[task][l].h)/billion);
+         comp_size_layer += comp_size;
+       }
+     }
+     // original comp 
+     comp_size = ((2.0*n*size*size*c1)*(net_para->output_maps[l+ftp_para->from_layer].w*net_para->output_maps[l+ftp_para->from_layer].h)/billion);
+     printf("Layer %u comp_size vs. original_comp_size: %f/%f (+%f%) (BFLOPs)\n", l+ftp_para->from_layer, comp_size_layer, comp_size, (comp_size_layer-comp_size)/(comp_size+0.000000001)*100.); 
+     total_comp_size += comp_size_layer; 
+     original_total_comp_size += comp_size; 
+   }
+   // assume that workload is evenly distributed, comm include input and output layer
+   total_comm_size = sizeof(float)*(float)(MAX_EDGE_NUM-LOCAL_FACTOR)/MAX_EDGE_NUM
+     * (net_para->input_maps[ftp_para->from_layer].w*net_para->input_maps[ftp_para->from_layer].h*net_para->input_maps[ftp_para->from_layer].c + net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w*net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h*net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c);
+   printf("Layer [%u~%u), total_comp_size vs. original_comp_size: %f/%f (+%f%) (BFLOPs), added %d (%fKB) comm\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, total_comp_size, original_total_comp_size, (total_comp_size-original_total_comp_size)/original_total_comp_size*100., total_comm_size, total_comm_size/1024.); 
+
+   ftp_overhead* ftp_o = (ftp_overhead*)malloc(sizeof(ftp_overhead));
+   ftp_o->comm_size = total_comm_size;
+   ftp_o->original_comp_size = original_total_comp_size;
+   ftp_o->extra_comp_size = total_comp_size - original_total_comp_size;
+   // evaluation score
+   //ftp_o->score = (float)original_total_comp_size/(ftp_o->extra_comp_size+1) + 1./(total_comm_size+1);
+   // TODO(lizhou): convert to execution/transfer time factor
+   // comm/comp ratio
+   float comm_comp_ratio = 500./billion;
+   printf("DEBUG: %f, %f, %f\n", original_total_comp_size, ftp_o->extra_comp_size, (float)total_comm_size*comm_comp_ratio);
+   ftp_o->score = (float)original_total_comp_size/(ftp_o->extra_comp_size+(float)total_comm_size*comm_comp_ratio+1);
+   return ftp_o;
+}
+
 #if DATA_REUSE
 /*Establish a dependency list, 0 means no dependencies, 1 depends on 0, 2 depends on 1 ...*/
 /*For current implementation, we only have 2 levels of dependency*/
@@ -230,13 +305,15 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
     // when the fused layer is deep, it is possible that adjacent tasks overlap
 #if DEBUG_MULTI_FTP
     fprintf(stderr, "Warning: too deep fused layers causing fully overlap w...\n");
+    exit(-1);
 #endif
     remaining_region.w2 = remaining_region.w1; 
     remaining_region.w = 1;
   }
   if (remaining_region.h <= 0) {
 #if DEBUG_MULTI_FTP
-     fprintf(stderr, "Warning: too deep fused layers causing fully overlap h...\n");
+    fprintf(stderr, "Warning: too deep fused layers causing fully overlap h...\n");
+    exit(-1);
 #endif
     remaining_region.h2 = remaining_region.h1; 
     remaining_region.h = 1;
@@ -245,6 +322,58 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
    return remaining_region;
 }
 
+void partition_and_estimate_reuse(network_parameters* net_para, ftp_parameters* ftp_para, ftp_parameters_reuse* ftp_para_reuse){
+   uint32_t task;
+   uint32_t data_size;
+   uint32_t input_size = 0;
+   uint32_t dw1, dw2;
+   uint32_t dh1, dh2;
+   uint32_t i, j;
+   int32_t l;
+
+   float comp_size;
+   float comp_size_layer;
+   float total_comp_size = 0;
+   float original_total_comp_size = 0;
+
+   uint32_t comm_size;
+   uint32_t comm_size_layer;
+   uint32_t total_comm_size = 0;
+   uint32_t sp_layer_comm_size = 0;
+
+   for(l = ftp_para->fused_layers-1; l >= 0; l--) {
+     comm_size_layer = 0;
+     comp_size_layer = 0;
+     for(i = 0; i < ftp_para->partitions_h; i++){
+       for(j = 0; j < ftp_para->partitions_w; j++){
+         task = ftp_para->task_id[i][j];
+         if (ftp_para_reuse->schedule[task] == 1) {
+           int32_t n = net_para->n[l+ftp_para_reuse->from_layer];
+           int32_t size = net_para->filter[l+ftp_para_reuse->from_layer];
+           int32_t c1 = net_para->input_maps[l+ftp_para_reuse->from_layer].c;
+           int32_t c2 = net_para->output_maps[l+ftp_para_reuse->from_layer].c;
+
+           dw1 = ftp_para->output_tiles[task][l].w * ftp_para->output_tiles[task][l].h;
+           dh1 = ftp_para_reuse->output_tiles[task][l].w * ftp_para_reuse->output_tiles[task][l].h;
+           comm_size = sizeof(float)*(dw1-dh1)*c2;
+           comp_size = ((2.0*n*size*size*c1) * (dw1-dh1)/1000000000.);
+           comm_size_layer += comm_size;
+           comp_size_layer += comp_size; 
+         } 
+       }
+     }
+     printf("Layer %u increased comm size: %u\n", l+ftp_para_reuse->from_layer, comm_size_layer);
+     printf("Layer %u reduced comp size: %f (BFLOPs)\n", l+ftp_para_reuse->from_layer, comp_size_layer); 
+     total_comm_size += comm_size_layer;
+     total_comp_size += comp_size_layer;
+   }
+   // add comm size at sp layer
+   sp_layer_comm_size += (ftp_para_reuse->partitions_w == 1 && ftp_para_reuse->partitions_h ==1) ? 0 : sizeof(float)*net_para->output_maps[ftp_para_reuse->from_layer+ftp_para_reuse->fused_layers-1].w 
+     * net_para->output_maps[ftp_para_reuse->from_layer+ftp_para_reuse->fused_layers-1].h
+     * net_para->output_maps[ftp_para_reuse->from_layer+ftp_para_reuse->fused_layers-1].c;
+ 
+   printf("Layer [%u~%u), total_comm_size: %u (%fKB) vs. total_comp_size: %f (BFLOPs) comm_sp_layer: %u (%fKB)\n", ftp_para_reuse->from_layer, ftp_para_reuse->from_layer+ftp_para_reuse->fused_layers, total_comm_size, total_comm_size/1024., total_comp_size, sp_layer_comm_size, sp_layer_comm_size/1024.); 
+}
 
 void calculate_reuse_data_size(ftp_parameters_reuse* ftp_para_reuse, network_parameters* net_para, uint32_t task_id){
 
@@ -299,17 +428,17 @@ void calculate_reuse_data_size(ftp_parameters_reuse* ftp_para_reuse, network_par
             ftp_para_reuse->self_reuse_data_size[task_id] += sizeof(float)*overlap_index.w*overlap_index.h*net_para->output_maps[l+ftp_para_reuse->from_layer].c;
       }
    }
-#if DEBUG_FTP
+#if DEBUG_MULTI_FTP
    printf("adjacent_reuse_data_size for task %d: %u\n", task_id, ftp_para_reuse->adjacent_reuse_data_size[task_id]);
    printf("self_reuse_data_size for task %d: %u\n", task_id, ftp_para_reuse->self_reuse_data_size[task_id]);
 #endif
 }
 
-
 /*This function must be called after perform_ftp()*/
 ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parameters* ftp_para){
    int32_t i, j, l;
    uint32_t task;
+   uint32_t total_reuse_data_size = 0;
 
    ftp_parameters_reuse* ftp_para_reuse = (ftp_parameters_reuse*)malloc(sizeof(ftp_parameters_reuse));
    ftp_para_reuse->partitions = ftp_para->partitions;
@@ -403,8 +532,14 @@ ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parame
       for(j = 0; j < ftp_para_reuse->partitions_w; j++){
          task = ftp_para_reuse->task_id[i][j];
          calculate_reuse_data_size(ftp_para_reuse, net_para, task);/*Will be used in reuse_data serialization*/
+         total_reuse_data_size += ftp_para_reuse->self_reuse_data_size[task];
       }
    }
+
+
+#if DEBUG_MULTI_FTP
+   printf("total reuse_data_size for current sp: %u\n", total_reuse_data_size);
+#endif
 
    return ftp_para_reuse;
 }

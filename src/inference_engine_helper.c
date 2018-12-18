@@ -1,8 +1,8 @@
 #include "inference_engine_helper.h"
 
-cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto){
+cnn_model* load_cnn_model_without_weights(char* cfg, char* weights, int from, int upto){
    cnn_model* model = (cnn_model*)malloc(sizeof(cnn_model));
-   network *net = load_network_from_upto(cfg, weights, from, upto, 0);
+   network *net = load_network_from_upto(cfg, weights, 0, 0, 0);
    // set batch size to 1 for testing
    set_batch_network(net, 1);
    net->truth = 0;
@@ -23,6 +23,51 @@ cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto){
       model->net_para->stride[l] = net->layers[l].stride;
       model->net_para->filter[l] = net->layers[l].size;
       model->net_para->type[l] = net->layers[l].type;
+      model->net_para->input_maps[l].w1 = 0;
+      model->net_para->input_maps[l].h1 = 0;
+      model->net_para->input_maps[l].w2 = net->layers[l].w - 1;
+      model->net_para->input_maps[l].h2 = net->layers[l].h - 1;
+      model->net_para->input_maps[l].w = net->layers[l].w;
+      model->net_para->input_maps[l].h = net->layers[l].h;
+      model->net_para->input_maps[l].c = net->layers[l].c;
+
+      model->net_para->output_maps[l].w1 = 0;
+      model->net_para->output_maps[l].h1 = 0;
+      model->net_para->output_maps[l].w2 = net->layers[l].out_w - 1;
+      model->net_para->output_maps[l].h2 = net->layers[l].out_h - 1;
+      model->net_para->output_maps[l].w = net->layers[l].out_w;
+      model->net_para->output_maps[l].h = net->layers[l].out_h;
+      model->net_para->output_maps[l].c = net->layers[l].out_c;
+   }
+   return model;
+}
+
+cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto){
+   cnn_model* model = (cnn_model*)malloc(sizeof(cnn_model));
+   network *net = load_network_from_upto(cfg, weights, from, upto, 0);
+   // set batch size to 1 for testing
+   set_batch_network(net, 1);
+   net->truth = 0;
+   net->train = 0;
+   net->delta = 0;
+   srand(2222222);
+   model->net = net;
+   /*Extract and record network parameters*/
+   model->net_para = (network_parameters*)malloc(sizeof(network_parameters));
+   model->net_para->layers= net->n;   
+   model->net_para->stride = (uint32_t*)malloc(sizeof(uint32_t)*(net->n));
+   model->net_para->filter = (uint32_t*)malloc(sizeof(uint32_t)*(net->n));
+   model->net_para->type = (uint32_t*)malloc(sizeof(uint32_t)*(net->n));
+   model->net_para->n = (uint32_t*)malloc(sizeof(uint32_t)*(net->n));
+   model->net_para->input_maps = (tile_region*) malloc(sizeof(tile_region)*(net->n));
+   model->net_para->output_maps = (tile_region*) malloc(sizeof(tile_region)*(net->n));
+   uint32_t l;
+   for(l = 0; l < (net->n); l++){
+      model->net_para->stride[l] = net->layers[l].stride;
+      model->net_para->filter[l] = net->layers[l].size;
+      model->net_para->type[l] = net->layers[l].type;
+      model->net_para->n[l] = net->layers[l].n; // #filters
+
       model->net_para->input_maps[l].w1 = 0;
       model->net_para->input_maps[l].h1 = 0;
       model->net_para->input_maps[l].w2 = net->layers[l].w - 1;
@@ -106,6 +151,10 @@ float* get_model_output(cnn_model* model, uint32_t layer){
 
 uint32_t get_model_byte_size(cnn_model* model, uint32_t layer){
    return model->net->layers[layer].outputs* sizeof(float);
+}
+
+void set_model_output(cnn_model* model, uint32_t layer, float* input){
+   model->net->layers[layer].output = input;
 }
 
 

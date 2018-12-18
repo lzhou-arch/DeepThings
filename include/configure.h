@@ -8,7 +8,7 @@
 #define PARTITIONS_H_MAX 6
 #define PARTITIONS_MAX 36
 #define THREAD_NUM 1
-#define DATA_REUSE 1
+#define DATA_REUSE 0
 
 #define POLL_MODE 1
 
@@ -18,7 +18,7 @@
 #define DEBUG_MULTI_FTP 0
 #define DEBUG_SERIALIZATION 0
 #define DEBUG_DEEP_GATEWAY 0
-#define DEBUG_DEEP_EDGE 0
+#define DEBUG_DEEP_EDGE 1
 #define DEBUG_REQUEST 0
 
 /*Print timing and communication size information*/

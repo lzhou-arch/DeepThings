@@ -31,10 +31,10 @@ int main(int argc, char **argv){
 
    // set the num of split points
    uint32_t num_sp = get_int_arg(argc, argv, "-sp", 1);
-   uint32_t* partitions_h = (uint32_t*)malloc(sizeof(uint32_t) * num_sp);
-   uint32_t* partitions_w = (uint32_t*)malloc(sizeof(uint32_t) * num_sp);
-   uint32_t* from_layers = (uint32_t*)malloc(sizeof(uint32_t) * num_sp);
-   uint32_t* fused_layers = (uint32_t*)malloc(sizeof(uint32_t) * num_sp);
+   uint32_t* partitions_h = (uint32_t*)malloc(sizeof(uint32_t) * FUSED_POINTS_MAX);
+   uint32_t* partitions_w = (uint32_t*)malloc(sizeof(uint32_t) * FUSED_POINTS_MAX);
+   uint32_t* from_layers = (uint32_t*)malloc(sizeof(uint32_t) * FUSED_POINTS_MAX);
+   uint32_t* fused_layers = (uint32_t*)malloc(sizeof(uint32_t) * FUSED_POINTS_MAX);
   
    partitions_h[0] = get_int_arg(argc, argv, "-n1", 4);
    partitions_w[0] = get_int_arg(argc, argv, "-m1", 4);
@@ -60,6 +60,11 @@ int main(int argc, char **argv){
    partitions_w[4] = get_int_arg(argc, argv, "-m5", 4);
    from_layers[4] = get_int_arg(argc, argv, "-f5", 8);
    fused_layers[4] = get_int_arg(argc, argv, "-l5", 16);
+
+   partitions_h[5] = get_int_arg(argc, argv, "-n6", 4);
+   partitions_w[5] = get_int_arg(argc, argv, "-m6", 4);
+   from_layers[5] = get_int_arg(argc, argv, "-f6", 8);
+   fused_layers[5] = get_int_arg(argc, argv, "-l6", 16);
 
    for(uint32_t i=0; i<num_sp; i++) {
     fprintf(stderr, "Split points %lu: [%lu, %lu)\n", i, from_layers[i], from_layers[i] + fused_layers[i]); 
@@ -94,6 +99,9 @@ int main(int argc, char **argv){
       printf("This client ID is %d\n", get_int_arg(argc, argv, "-edge_id", 0));
       this_cli_id = get_int_arg(argc, argv, "-edge_id", 0);
       deepthings_stealer_edge(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id);
+   }else if(0 == strcmp(get_string_arg(argc, argv, "-mode", "none"), "estimate")) {
+      printf("Find the optimal fused points\n");
+      deepthings_estimate(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id);
    }else {
       printf("Invalid cmd.\n");
       exit(-1);

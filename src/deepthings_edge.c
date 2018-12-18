@@ -11,6 +11,78 @@
 static double commu_size;
 #endif
 
+// alexnet
+//#define FUSED_DEEPTH 8
+//#define STOP_AT_LAYER 8 
+// yolo
+//#define FUSED_DEEPTH 25 
+//#define STOP_AT_LAYER 25
+// vgg-16
+#define FUSED_DEEPTH 18
+#define STOP_AT_LAYER 18
+//
+device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
+   device_ctxt* ctxt = init_client(edge_id);
+   // don't load weights
+   cnn_model* model = load_cnn_model(network, weights, 0, 0);
+   model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
+#if DATA_REUSE
+   model->ftp_para_reuse_list = (ftp_parameters_reuse**)malloc(sizeof(ftp_parameters_reuse*)*num_sp);
+#endif
+   model->num_sp = num_sp;
+
+   uint32_t i = 0;
+   uint32_t from_layer_, fused_layers_; 
+
+   from_layer_ = 0;
+   while(from_layer_ < STOP_AT_LAYER) {
+     float max_sp_score = 0;
+     uint32_t op;
+     ftp_parameters** ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*FUSED_DEEPTH);
+     ftp_overhead** ftp_overhead_list = (ftp_overhead**)malloc(sizeof(ftp_overhead*)*FUSED_DEEPTH);
+     for(fused_layers_ = 1; fused_layers_ < FUSED_DEEPTH && from_layer_+fused_layers_-1 < STOP_AT_LAYER; fused_layers_++) {
+       printf("Estimate cost for [%d, %d)..\n", from_layer_, from_layer_+fused_layers_);
+       //model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);
+       ftp_para_list[fused_layers_] = preform_ftp(2, 2, from_layer_, fused_layers_, model->net_para);
+#if DATA_REUSE
+       //model->ftp_para_reuse_list[i] = preform_ftp_reuse(model->net_para, model->ftp_para_list[i]);
+#endif
+       ftp_overhead_list[fused_layers_] = partition_and_estimate(model->net_para, ftp_para_list[fused_layers_]);
+#if DATA_REUSE
+       // TODO(lizhou): fix the para
+       //partition_and_estimate_reuse(model->net_para, model->ftp_para_list[i], model->ftp_para_reuse_list[i]);
+#endif
+       // stats
+       float total_comp_size = 0;
+       float total_extra_comp_size = 0;
+       uint32_t total_comm_size = 0;
+       float score = 0;
+
+       total_comp_size = ftp_overhead_list[fused_layers_]->original_comp_size;
+       total_extra_comp_size = ftp_overhead_list[fused_layers_]->extra_comp_size;
+       total_comm_size = ftp_overhead_list[fused_layers_]->comm_size;
+       score = ftp_overhead_list[fused_layers_]->score;
+       
+       printf("Total FTP extra_comp_size (+%f) vs. original_comp_size (%f) BFLOPs, comm_size %u (%fKB), overhead factor: %f\n", total_extra_comp_size, total_comp_size, total_comp_size, total_comm_size/1024., score);
+     }
+     for(fused_layers_ = 1; fused_layers_ < FUSED_DEEPTH && from_layer_+fused_layers_-1 < STOP_AT_LAYER; fused_layers_++) {
+       if(max_sp_score <= ftp_overhead_list[fused_layers_]->score) {
+         max_sp_score = ftp_overhead_list[fused_layers_]->score;
+         op = fused_layers_;
+       }
+     }
+     printf("op from_layer_ to fused_layers_ [%d, %d) with score: %f\n", from_layer_, from_layer_+op, ftp_overhead_list[op]->score);
+     from_layer_ = from_layer_+op;
+   }
+
+   // set to fisrt sp
+   //model->ftp_para = model->ftp_para_list[0];
+#if DATA_REUSE
+   //model->ftp_para_reuse = model->ftp_para_reuse_list[0];
+#endif
+   return ctxt;
+}
+
 device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
    device_ctxt* ctxt = init_client(edge_id);
    // Load model weights from [0, last_fused_layers)
@@ -88,11 +160,14 @@ void request_reuse_data(device_ctxt* ctxt, blob* task_input_blob, bool* reuse_da
    char local_addr[ADDR_LEN];
    strcpy(local_addr, "192.168.1.9");
    //conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
+   
+   fprintf(stderr, "check cur_sp %d, %u ...\n", cur_sp, ctxt->num_sp-1);
+
    if(cur_sp == ctxt->num_sp-1) {
      fprintf(stderr, "Request reuse data from gateway ...\n");
      conn = connect_service(TCP, ctxt->gateway_local_addr, WORK_STEAL_PORT + 10);
    } else {
-     fprintf(stderr, "Request reuse data from locall ...\n");
+     fprintf(stderr, "Request reuse data from local ...\n");
      conn = connect_service(TCP, local_addr, WORK_STEAL_PORT);  // use the same port w/ steal
    }
    send_request("request_reuse_data", 20, conn);
@@ -182,6 +257,8 @@ void partition_frame_and_perform_inference_thread(void *arg){
           printf("Client %d, frame sequence number %d, split at %d, all partitions are merged locally\n", cli_id, frame_seq, sp_id);
 #endif
           float* fused_output = (float*)(temp->data);
+          // keep output for the last fused layer
+          set_model_output(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1, fused_output);
           set_model_input(model, fused_output);
           //double time = sys_now_in_sec();
           //printf("Test forward all");
@@ -521,6 +598,7 @@ void* update_coverage(void* srv_conn, void* arg){
 }
 
 void notify_coverage_by_ip(device_ctxt* ctxt, blob* task_input_blob, uint32_t cli_id, char* cli_addr){
+   printf("notify coverage by ip...\n");
    char data[20]="empty";
    blob* temp = new_blob_and_copy_data(cli_id, 20, (uint8_t*)data);
    copy_blob_meta(temp, task_input_blob);
@@ -546,6 +624,7 @@ void* recv_reuse_data_from_edge_local(void* srv_conn, void* arg){
    char ip_addr[ADDRSTRLEN];
    int32_t processing_cli_id;
    inet_ntop(conn->serv_addr_ptr->sin_family, &(conn->serv_addr_ptr->sin_addr), ip_addr, ADDRSTRLEN);
+   // only works for gateway
    processing_cli_id = get_client_id(ip_addr, (device_ctxt*)arg);
    if(processing_cli_id < 0)
       printf("Client IP address unknown ... ...\n");
@@ -579,7 +658,10 @@ void* recv_reuse_data_from_edge_local(void* srv_conn, void* arg){
    if(processing_cli_id != cli_id) notify_coverage_by_ip((device_ctxt*)arg, temp, cli_id, "192.168.1.9");
    free_blob(temp);
 
-   printf("JJJJ ... ...\n");
+#if DEBUG_DEEP_GATEWAY
+   printf("Reuse data is received!\n");
+#endif
+
 
    return NULL;
 }
@@ -710,3 +792,6 @@ void deepthings_victim_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t*
    sys_thread_join(t4);
 }
 
+void deepthings_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
+   device_ctxt* ctxt = deepthings_edge_estimate(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id);
+}

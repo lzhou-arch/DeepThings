@@ -4,6 +4,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef struct def_ftp_overhead{
+  uint32_t comm_size;  // added comm size
+  float original_comp_size; // original comp size to be parallelized
+  float extra_comp_size; // added comp size after partition
+  float score;
+} ftp_overhead; 
+
 typedef struct partition_range{
     int32_t w1;
     int32_t h1;
@@ -31,6 +38,7 @@ typedef struct def_network_para{
    uint32_t *stride;
    uint32_t *filter;
    uint32_t *type;
+   uint32_t *n; // #filters for cnn layer
    tile_region *input_maps;
    tile_region *output_maps;
 } network_parameters;
@@ -71,6 +79,7 @@ typedef struct def_ftp_parameters_reuse{
 } ftp_parameters_reuse;
 
 ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parameters* ftp_para);
+void partition_and_estimate_reuse(network_parameters* net_para, ftp_parameters* ftp_para, ftp_parameters_reuse* ftp_para_reuse);
 uint32_t get_coverage(ftp_parameters_reuse* ftp_para_reuse, uint32_t task_id);
 void set_coverage(ftp_parameters_reuse* ftp_para_reuse, uint32_t task_id);
 void set_missing(ftp_parameters_reuse* ftp_para_reuse, uint32_t task_id);
@@ -88,5 +97,6 @@ void set_data(overlapped_tile_data * overlap, uint32_t pos, float* data);
 #endif
 
 ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from, uint32_t fused_layers, network_parameters* net_para);
+ftp_overhead* partition_and_estimate(network_parameters* net_para, ftp_parameters* ftp_para);
 void print_tile_region(tile_region tile);
 #endif
