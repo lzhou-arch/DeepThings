@@ -28,6 +28,7 @@ typedef struct def_ftp_para{
    // can start from any layer, default is 0
    uint32_t from_layer;
    uint32_t fused_layers;
+   int gap_after;
    uint32_t task_id[PARTITIONS_H_MAX][PARTITIONS_W_MAX];
    tile_region input_tiles[PARTITIONS_MAX][FUSED_LAYERS_MAX];
    tile_region output_tiles[PARTITIONS_MAX][FUSED_LAYERS_MAX];

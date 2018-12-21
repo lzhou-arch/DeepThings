@@ -65,6 +65,7 @@ cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto);
 void forward_partition(cnn_model* model, uint32_t task_id, bool is_reuse);
 image_holder load_image_as_model_input(cnn_model* model, uint32_t id);
 void free_image_holder(cnn_model* model, image_holder sized);
+void forward_from_upto(cnn_model* model, uint32_t from, uint32_t upto);
 void forward_all(cnn_model* model, uint32_t from);
 void draw_object_boxes(cnn_model* model, uint32_t id);
 

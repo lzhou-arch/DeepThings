@@ -185,6 +185,21 @@ void free_image_holder(cnn_model* model, image sized){
    free_image(sized);   
 }
 
+void forward_from_upto(cnn_model* model, uint32_t from, uint32_t upto){
+   network net = *(model->net);
+   int32_t i;
+   for(i = from; i < upto; ++i){
+      net.index = i;
+      if(net.layers[i].delta){	       
+         fill_cpu(net.layers[i].outputs * net.layers[i].batch, 0, net.layers[i].delta, 1);
+      }
+      net.layers[i].forward(net.layers[i], net);
+      net.input = net.layers[i].output;
+      if(net.layers[i].truth) {
+         net.truth = net.layers[i].output;
+      }
+   }
+}
 
 void forward_all(cnn_model* model, uint32_t from){
    network net = *(model->net);

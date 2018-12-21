@@ -90,6 +90,11 @@ device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uin
    model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
    for (int i = 0; i < num_sp; i++) {
      model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);
+     if (i > 0) {
+       if (model->ftp_para_list[i-1]->from_layer+model->ftp_para_list[i-1]->fused_layers < model->ftp_para_list[i]->from_layer) {
+         model->ftp_para_list[i-1]->gap_after = 1;
+       }
+     }
    }
    model->num_sp = num_sp;
    // set to fisrt sp
@@ -241,30 +246,42 @@ void partition_frame_and_perform_inference_thread(void *arg){
       load_image_as_model_input(model, frame_num);
       printf("Image loaded in: %lf seconds\n", sys_now_in_sec() - time);
 
+      int processed_locally = 0;
       // process partitions between split points
       for (int i=0; i< (int)model->num_sp; i++) {
         printf("Process split point %d:%u ...\n", i, model->num_sp);
         
         time= sys_now_in_sec();
         if (i > 0) {
-          fprintf(stderr, "Check if temp results are ready at sp %u ...\n", model->cur_sp);
-          // merge collected intermediate result and set model input 
-          blob* temp = local_dequeue_and_merge(ctxt);
+          if (processed_locally == 0) {
+            // merge collected intermediate result and set model input 
+            fprintf(stderr, "Check if temp results are ready at sp %u ...\n", model->cur_sp);
+            blob* temp = local_dequeue_and_merge(ctxt);
 #if DEBUG_FLAG
-          int32_t cli_id = get_blob_cli_id(temp);
-          int32_t frame_seq = get_blob_frame_seq(temp);
-          int32_t sp_id = get_blob_frame_seq(temp);
-          printf("Client %d, frame sequence number %d, split at %d, all partitions are merged locally\n", cli_id, frame_seq, sp_id);
+            int32_t cli_id = get_blob_cli_id(temp);
+            int32_t frame_seq = get_blob_frame_seq(temp);
+            int32_t sp_id = get_blob_frame_seq(temp);
+            printf("Client %d, frame sequence number %d, split at %d, all partitions are merged locally\n", cli_id, frame_seq, sp_id);
 #endif
-          float* fused_output = (float*)(temp->data);
-          // keep output for the last fused layer
-          set_model_output(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1, fused_output);
-          set_model_input(model, fused_output);
-          //double time = sys_now_in_sec();
-          //printf("Test forward all");
-          //forward_all(model, model->ftp_para_list[0]->fused_layers);
-          //printf(" in: %f\n", sys_now_in_sec() - time);
-          //exit(-1);
+            float* fused_output = (float*)(temp->data);
+            // keep output for the last fused layer
+            //set_model_output(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1, fused_output);
+            set_model_input(model, fused_output);
+          } else {
+            // input is from local layer
+            set_model_input(model, model->net->layers[model->ftp_para->from_layer+model->ftp_para->fused_layers-1].output);
+            processed_locally = 0;
+          }
+          if (model->ftp_para->from_layer+model->ftp_para->fused_layers < model->ftp_para_list[i]->from_layer && model->ftp_para->gap_after == 1) {
+            fprintf(stderr, "Warning: Non fused layers in between, keep calm and carry on...\n");
+            double time = sys_now_in_sec();
+            forward_from_upto(model, model->ftp_para->from_layer+model->ftp_para->fused_layers, model->ftp_para_list[i]->from_layer);
+            printf("Process non-fused layers in: %f\n", sys_now_in_sec() - time);
+            i--;  // rollback
+            model->ftp_para->gap_after = 0;  // set gap is done
+            processed_locally = 1;
+            continue;
+          }
         }
 
         // set model ftp para 
