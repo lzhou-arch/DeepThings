@@ -18,68 +18,34 @@ static double commu_size;
 //#define FUSED_DEEPTH 25 
 //#define STOP_AT_LAYER 25
 // vgg-16
-#define FUSED_DEEPTH 18
-#define STOP_AT_LAYER 18
+//#define FUSED_DEEPTH 18
+//#define STOP_AT_LAYER 18
 //
+//
+
 device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
    device_ctxt* ctxt = init_client(edge_id);
    // don't load weights
    cnn_model* model = load_cnn_model(network, weights, 0, 0);
-   model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
-#if DATA_REUSE
-   model->ftp_para_reuse_list = (ftp_parameters_reuse**)malloc(sizeof(ftp_parameters_reuse*)*num_sp);
-#endif
-   model->num_sp = num_sp;
 
-   uint32_t i = 0;
-   uint32_t from_layer_, fused_layers_; 
+   // layer-wise
+   layer_wise_overhead** layer_wise_overhead_list = layer_wise_estimate(model->net_para);
 
-   from_layer_ = 0;
-   while(from_layer_ < STOP_AT_LAYER) {
-     float max_sp_score = 0;
-     uint32_t op;
-     ftp_parameters** ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*FUSED_DEEPTH);
-     ftp_overhead** ftp_overhead_list = (ftp_overhead**)malloc(sizeof(ftp_overhead*)*FUSED_DEEPTH);
-     for(fused_layers_ = 1; fused_layers_ < FUSED_DEEPTH && from_layer_+fused_layers_-1 < STOP_AT_LAYER; fused_layers_++) {
-       printf("Estimate cost for [%d, %d)..\n", from_layer_, from_layer_+fused_layers_);
-       //model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);
-       ftp_para_list[fused_layers_] = preform_ftp(2, 2, from_layer_, fused_layers_, model->net_para);
-#if DATA_REUSE
-       //model->ftp_para_reuse_list[i] = preform_ftp_reuse(model->net_para, model->ftp_para_list[i]);
-#endif
-       ftp_overhead_list[fused_layers_] = partition_and_estimate(model->net_para, ftp_para_list[fused_layers_]);
-#if DATA_REUSE
-       // TODO(lizhou): fix the para
-       //partition_and_estimate_reuse(model->net_para, model->ftp_para_list[i], model->ftp_para_reuse_list[i]);
-#endif
-       // stats
-       float total_comp_size = 0;
-       float total_extra_comp_size = 0;
-       uint32_t total_comm_size = 0;
-       float score = 0;
+   // DP search for opt sol
+   // store the opt layer result for each from_layer
+   uint32_t* dp_opt_fused_layers = (uint32_t*)malloc(sizeof(uint32_t)*model->net->n);
+   float min_total_time = dp_buttom_up(0, model->net->n, model->net_para, layer_wise_overhead_list, dp_opt_fused_layers);
 
-       total_comp_size = ftp_overhead_list[fused_layers_]->original_comp_size;
-       total_extra_comp_size = ftp_overhead_list[fused_layers_]->extra_comp_size;
-       total_comm_size = ftp_overhead_list[fused_layers_]->comm_size;
-       score = ftp_overhead_list[fused_layers_]->score;
-       
-       printf("Total FTP extra_comp_size (+%f) vs. original_comp_size (%f) BFLOPs, comm_size %u (%fKB), overhead factor: %f\n", total_extra_comp_size, total_comp_size, total_comp_size, total_comm_size/1024., score);
-     }
-     for(fused_layers_ = 1; fused_layers_ < FUSED_DEEPTH && from_layer_+fused_layers_-1 < STOP_AT_LAYER; fused_layers_++) {
-       if(max_sp_score <= ftp_overhead_list[fused_layers_]->score) {
-         max_sp_score = ftp_overhead_list[fused_layers_]->score;
-         op = fused_layers_;
-       }
-     }
-     printf("op from_layer_ to fused_layers_ [%d, %d) with score: %f\n", from_layer_, from_layer_+op, ftp_overhead_list[op]->score);
-     from_layer_ = from_layer_+op;
+   printf("OPT: min total time: %f\n", min_total_time);
+   printf("OPT fused points:\n"); 
+   for (int32_t l = 0; l < model->net->n; l++) {
+     printf("%u ", l);
+     uint32_t opt_fused_layers = dp_opt_fused_layers[l];
+     l += opt_fused_layers-1;
    }
 
-   // set to fisrt sp
-   //model->ftp_para = model->ftp_para_list[0];
-#if DATA_REUSE
-   //model->ftp_para_reuse = model->ftp_para_reuse_list[0];
-#endif
+   // print tc, tx
+   //print_dp_time();
    return ctxt;
 }
 

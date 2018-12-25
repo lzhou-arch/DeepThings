@@ -4,11 +4,27 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef struct def_layer_wise_overhead{
+  uint32_t opt_dev;
+  float time;
+  float time_comp;
+  float time_comm;
+  float bflops;
+  float comm_size;
+} layer_wise_overhead; 
+
 typedef struct def_ftp_overhead{
-  uint32_t comm_size;  // added comm size
-  float original_comp_size; // original comp size to be parallelized
-  float extra_comp_size; // added comp size after partition
-  float score;
+  int32_t set;
+  uint32_t from_layer;
+  uint32_t fused_layers;
+  uint32_t opt_dev;
+  float time;
+  float time_comp;
+  float time_comm;
+  float bflops;
+  float original_bflops; // original comp size to be parallelized (BFLOPS)
+  float comm_size;
+  float score; // TBD
 } ftp_overhead; 
 
 typedef struct partition_range{
@@ -22,6 +38,7 @@ typedef struct partition_range{
 } tile_region;
 
 typedef struct def_ftp_para{
+   int32_t layer_undefined;
    uint32_t partitions;
    uint32_t partitions_w;
    uint32_t partitions_h;
@@ -98,6 +115,9 @@ void set_data(overlapped_tile_data * overlap, uint32_t pos, float* data);
 #endif
 
 ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from, uint32_t fused_layers, network_parameters* net_para);
-ftp_overhead* partition_and_estimate(network_parameters* net_para, ftp_parameters* ftp_para);
+layer_wise_overhead** layer_wise_estimate(network_parameters* net_para);
+ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_para, layer_wise_overhead** layer_wise_overhead_list);
+float dp_buttom_up(uint32_t from_layer, uint32_t fused_layers, network_parameters* net_para, layer_wise_overhead** layer_wise_overhead_list, uint32_t* dp_opt_fused_layers);
 void print_tile_region(tile_region tile);
+void print_dp_time();
 #endif
