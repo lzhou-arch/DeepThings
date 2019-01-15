@@ -14,7 +14,6 @@ typedef struct def_layer_wise_overhead{
 } layer_wise_overhead; 
 
 typedef struct def_ftp_overhead{
-  int32_t set;
   uint32_t from_layer;
   uint32_t fused_layers;
   uint32_t opt_dev;
@@ -119,5 +118,5 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para);
 ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_para, layer_wise_overhead** layer_wise_overhead_list);
 float dp_buttom_up(uint32_t from_layer, uint32_t fused_layers, network_parameters* net_para, layer_wise_overhead** layer_wise_overhead_list, uint32_t* dp_opt_fused_layers);
 void print_tile_region(tile_region tile);
-void print_dp_time();
+void print_dp_time(layer_wise_overhead** layer_wise_overhead_list, uint32_t from_layer, uint32_t fused_layers, int32_t end);
 #endif

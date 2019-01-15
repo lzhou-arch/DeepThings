@@ -33,19 +33,19 @@ device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M,
 
    // DP search for opt sol
    // store the opt layer result for each from_layer
-   uint32_t* dp_opt_fused_layers = (uint32_t*)malloc(sizeof(uint32_t)*model->net->n);
+   int32_t* dp_opt_fused_layers = (uint32_t*)malloc(sizeof(uint32_t)*model->net->n);
    float min_total_time = dp_buttom_up(0, model->net->n, model->net_para, layer_wise_overhead_list, dp_opt_fused_layers);
 
    printf("OPT: min total time: %f\n", min_total_time);
    printf("OPT fused points:\n"); 
    for (int32_t l = 0; l < model->net->n; l++) {
-     printf("%u ", l);
-     uint32_t opt_fused_layers = dp_opt_fused_layers[l];
+     int32_t opt_fused_layers = dp_opt_fused_layers[l];
+     printf("[%d, %d) ", l, l+opt_fused_layers);
+     print_dp_time(layer_wise_overhead_list, l, opt_fused_layers, 0);
      l += opt_fused_layers-1;
    }
+   print_dp_time(layer_wise_overhead_list, 0, 0, 1);
 
-   // print tc, tx
-   //print_dp_time();
    return ctxt;
 }
 

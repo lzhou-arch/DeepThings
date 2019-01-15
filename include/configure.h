@@ -33,7 +33,7 @@
 #define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11"}
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12"}
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12", "192.168.1.13", "192.168.1.14"}
-#define MAX_EDGE_NUM 12
+#define MAX_EDGE_NUM 4
 #define FRAME_NUM 1
 
 #define LOAD_AWARE 0

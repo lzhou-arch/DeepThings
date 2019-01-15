@@ -153,9 +153,15 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
    // linear regression model
    //float coef_conv_inter = 0.04641, coef_conv_inputs = 0.0000009342, coef_conv_filters = 0.0001828;
    float coef_conv_inter = 0.1049, coef_conv_inputs = 0.0000008736, coef_conv_filters = 0.0004246; // vgg-16 only
+   //float coef_conv_inter = -0.03344, coef_conv_inputs = 0.0000006455, coef_conv_filters = 0.0001559; // yolov2 only
+   //float coef_conv_inter = -0.0518, coef_conv_inputs = 0.000001101, coef_conv_filters = 0.00006975; // alexnet only
    float coef_maxpool_inter = 0.0354664, coef_maxpool_inputs = -0.0002746, coef_maxpool_outputs = 0.0011031;
-   float tx1 = 0.000361, tx2 = 0.0983; // my wifi
+
+   float tx1 = 0.000361*10, tx2 = 0.0983*10; // slowest x10
+   //float tx1 = 0.000361, tx2 = 0.0983; // my wifi
    //float tx1 = 0.0002, tx2 = 0.002; // iros paper
+   //float tx1 = 0.00002, tx2 = 0.0002; // 1/10 
+   //float tx1 = 0.000000000001, tx2 = 0.000000000001; // simulate local memory
 
    float billion = 1000000000.;
    
@@ -201,8 +207,8 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
        fprintf(stderr, "Warning: unsupported layer.\n");
        // only supported parallelize conv and maxpool, process other layers locally
        // no comm cost, comp is estimated by a fixed value.
-       t_layer_min = 0.5; 
-       t_layer_comp = 0.5; 
+       //t_layer_min = t_layer_min = t_layer_1d = 0.5; // too high for alexnet 
+       t_layer_min = t_layer_min = t_layer_1d = 0.05; // too high for alexnet 
        t_layer_comm = 0; 
        opt_d = 1; 
        comp_size = 0.05;
@@ -211,7 +217,9 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
        // parallelize conv and maxpool
        // layer-wise comm, includes input and output tensor
        uint32_t comm_size_in = sizeof(float)*(net_para->input_maps[l].w*net_para->input_maps[l].h*net_para->input_maps[l].c); 
-       uint32_t comm_size_out = sizeof(float)*(net_para->output_maps[l].w*net_para->output_maps[l].h*net_para->output_maps[l].c);
+       //uint32_t comm_size_out = sizeof(float)*(net_para->output_maps[l].w*net_para->output_maps[l].h*net_para->output_maps[l].c);
+       // assume that output and input is overlapped for each layer
+       uint32_t comm_size_out = 0;
        comm_size = comm_size_layer_wise = (float)(comm_size_in+comm_size_out)/1024.;
        printf("Info layer-wise(%u): %f KB\n", l, comm_size);
 
@@ -229,9 +237,6 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
        t_layer_comp = t_layer_1d;
        t_layer_comm = 0;
 
-       //  record 1d performance as baseline
-       total_time_1d += t_layer_1d;
-
        for (int d = 2; d <= MAX_EDGE_NUM; d++) {
          // consider the parallel coef, not exactly divide by d, with 10% overhead
          float tc = t_layer_1d/d*PARALLEL_OVERHEAD; // decrease
@@ -240,11 +245,11 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
          // uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
          uint32_t num_partitons = d;
          // layer-wise comm, includes input and output tensor, should also decrease
-         float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitons*(float)(d-LOCAL_FACTOR)/(float)(d))
-           + (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
+         float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitons*(float)(d-LOCAL_FACTOR)/(float)(d));
+           //+ (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
            //+ (diff_comm_size > 0) ? (tx1*diff_comm_size*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2) : 0;
          t_layer = tc + tx;
-         printf("DEBUG layer-wise(%u) %d devices: tc vs tx: %f, %f, total: %f\n", l, d, tc, tx, t_layer);
+         printf("INFOTIME layer-wise(%u) %d devices: tc vs tx: %f, %f, total: %f\n", l, d, tc, tx, t_layer);
          if (t_layer*PARALLEL_GAIN < t_layer_min) {
            printf("Add Dev (%d -> %d)\n", opt_d, d);
            t_layer_min = t_layer;
@@ -256,6 +261,9 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
        }
      }
 
+     //  record 1d performance as baseline
+     total_time_1d += t_layer_1d;
+
      layer_wise_overhead_list[l] = (layer_wise_overhead*)malloc(sizeof(layer_wise_overhead));
      layer_wise_overhead_list[l]->time = t_layer_min; 
      layer_wise_overhead_list[l]->time_comp = t_layer_comp; 
@@ -264,7 +272,7 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
      layer_wise_overhead_list[l]->bflops = comp_size;
      layer_wise_overhead_list[l]->comm_size = comm_size_layer_wise;
 
-     printf("Layer %u opt_dev: %d, layer-wise time(s): %f (%fKB)\n", l, opt_d, t_layer_min, comm_size_layer_wise);
+     printf("Layer %u opt_dev: %d, layer-wise time(s): %f vs. %f (%fKB)\n", l, opt_d, t_layer_min, t_layer_1d, comm_size_layer_wise);
    } // end for
 
    total_time = total_comp_time = total_comm_time = total_comp = total_comm = 0;
@@ -344,8 +352,15 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
    // TODO(lizhou): validate the coef value under ftp partitions
    //float coef_conv_inter = 0.04641, coef_conv_inputs = 0.0000009342, coef_conv_filters = 0.0001828;
    float coef_conv_inter = 0.1049, coef_conv_inputs = 0.0000008736, coef_conv_filters = 0.0004246; // vgg-16 only
+   //float coef_conv_inter = -0.03344, coef_conv_inputs = 0.0000006455, coef_conv_filters = 0.0001559; // yolov2 only
+   //float coef_conv_inter = -0.0518, coef_conv_inputs = 0.000001101, coef_conv_filters = 0.00006975; // alexnet only
    float coef_maxpool_inter = 0.0354664, coef_maxpool_inputs = -0.0002746, coef_maxpool_outputs = 0.0011031;
-   float tx1 = 0.000361, tx2 = 0.0983; // tx1 * x + tx2
+
+   float tx1 = 0.000361*10, tx2 = 0.0983*10; // slowest x10
+   //float tx1 = 0.000361, tx2 = 0.0983; // tx1 * x + tx2 my wifi
+   //float tx1 = 0.0002, tx2 = 0.002; // iros paper
+   //float tx1 = 0.00002, tx2 = 0.0002; // 1/10
+   //float tx1 = 0.000000000001, tx2 = 0.000000000001; // simulate local memory
 
    // number of conv in fused_layer
    int32_t num_conv = 0;
@@ -387,6 +402,7 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
          if (net_para->type[l+ftp_para->from_layer] == CONVOLUTIONAL) {
            comp_conv_var1 += c1*ftp_para->input_tiles[task][l].w*ftp_para->input_tiles[task][l].h;
            // TODO(lizhou): adjust the model for ftp, now add once for same layer 
+           // NOTE: may lead to smaller results for 1 device.
            comp_conv_var2 = (float)(size*size)/(float)(stride*stride)*n;
            comp_size = ((2.0*n*size*size*c1)*(ftp_para->output_tiles[task][l].w*ftp_para->output_tiles[task][l].h)/billion); // BFLOPS
          } else if (net_para->type[l+ftp_para->from_layer] == MAXPOOL) {
@@ -448,6 +464,7 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
      // for this equation but should be updated to par_h*par_w
      //uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
      uint32_t num_partitons = d;
+     //uint32_t num_partitons = ftp_para->partitions_h*ftp_para->partitions_w; // use this will increase tc, since tx cost is higher
      // layer-wise comm, includes input and output tensor, should also decrease
      float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitons*(float)(d-LOCAL_FACTOR)/(float)d)
        + (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
@@ -465,7 +482,6 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
    }
 
    ftp_overhead* ftp_o = (ftp_overhead*)malloc(sizeof(ftp_overhead));
-   ftp_o->set = 1;
    ftp_o->time = total_time_fused_layer; 
    ftp_o->time_comp = t_layer_comp; 
    ftp_o->time_comm = t_layer_comm; 
@@ -545,9 +561,25 @@ float dp_buttom_up(uint32_t from_layer, uint32_t fused_layers, network_parameter
    return min_total_time;
 }
 
-void print_dp_time() {
-
-  printf("OPT: tc: %f, tx: %f\n", 
+static float dp_time_comp, dp_time_comm;
+void print_dp_time(layer_wise_overhead** layer_wise_overhead_list, uint32_t from_layer, uint32_t fused_layers, int32_t end){
+  if (end == 1) printf("Total OPT time: %f (tc: %f, tx: %f)\n", dp_time_comp+dp_time_comm, dp_time_comp, dp_time_comm);
+  else {
+    float tmp_time_comp, tmp_time_comm;
+    tmp_time_comp = tmp_time_comm = 0;
+    if (ftp_overhead_map[from_layer][fused_layers] == 1) {
+      tmp_time_comp = fused_layer_overhead_list[from_layer][fused_layers]->time_comp;
+      tmp_time_comm = fused_layer_overhead_list[from_layer][fused_layers]->time_comm;
+    } else {
+      for (int32_t l = from_layer; l < (int32_t)from_layer+fused_layers; l++) {
+        tmp_time_comp += layer_wise_overhead_list[l]->time_comp;
+        tmp_time_comm += layer_wise_overhead_list[l]->time_comm;
+      }
+    }
+    dp_time_comp += tmp_time_comp;
+    dp_time_comm += tmp_time_comm;
+    printf("time: %f (tc: %f, tx: %f)\n", tmp_time_comp+tmp_time_comm, tmp_time_comp, tmp_time_comm);
+  }
 }
 
 #if DATA_REUSE
