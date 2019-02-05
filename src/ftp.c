@@ -208,11 +208,19 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
        // only supported parallelize conv and maxpool, process other layers locally
        // no comm cost, comp is estimated by a fixed value.
        //t_layer_min = t_layer_min = t_layer_1d = 0.5; // too high for alexnet 
-       t_layer_min = t_layer_min = t_layer_1d = 0.05; // too high for alexnet 
+       //t_layer_comp = t_layer_min = t_layer_1d = 0.05; // too high for alexnet 
+       t_layer_comp = t_layer_min = t_layer_1d = 0.5; // too high for alexnet 
        t_layer_comm = 0; 
        opt_d = 1; 
        comp_size = 0.05;
        comm_size_layer_wise = 0;
+       if (net_para->type[l] == SHORTCUT) {
+         t_layer_comp = t_layer_min = t_layer_1d = 0;
+         t_layer_comm = 0; 
+         opt_d = 1; 
+         comp_size = 0; // output size? 
+         comm_size_layer_wise = 0;
+       }
      } else {
        // parallelize conv and maxpool
        // layer-wise comm, includes input and output tensor
@@ -243,9 +251,9 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
          // Note: since comm and comp are pipelined, tx = (d-1) tx(in) + 1 tx(out)
          // tx can take more time, if tx(out) > tx(in), should add wait time
          // uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
-         uint32_t num_partitons = d;
+         uint32_t num_partitions = d;
          // layer-wise comm, includes input and output tensor, should also decrease
-         float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitons*(float)(d-LOCAL_FACTOR)/(float)(d));
+         float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitions*(float)(d-LOCAL_FACTOR)/(float)(d));
            //+ (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
            //+ (diff_comm_size > 0) ? (tx1*diff_comm_size*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2) : 0;
          t_layer = tc + tx;
@@ -272,7 +280,7 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
      layer_wise_overhead_list[l]->bflops = comp_size;
      layer_wise_overhead_list[l]->comm_size = comm_size_layer_wise;
 
-     printf("Layer %u opt_dev: %d, layer-wise time(s): %f vs. %f (%fKB)\n", l, opt_d, t_layer_min, t_layer_1d, comm_size_layer_wise);
+     printf("Layer %u opt_dev: %d, layer-wise time(s): %f vs. %f (%fKB) accum 1d: %f\n", l, opt_d, t_layer_min, t_layer_1d, comm_size_layer_wise, total_time_1d);
    } // end for
 
    total_time = total_comp_time = total_comm_time = total_comp = total_comm = 0;
@@ -301,12 +309,13 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
    uint32_t task;
    uint32_t data_size;
    uint32_t input_size = 0;
+   uint32_t output_size = 0;
    uint32_t dw1, dw2;
    uint32_t dh1, dh2;
    uint32_t i, j;
    int32_t l;
 
-   printf("Task size:");
+   printf("Task size:\n");
    for(i = 0; i < ftp_para->partitions_h; i++){
       for(j = 0; j < ftp_para->partitions_w; j++){
          task = ftp_para->task_id[i][j];
@@ -316,7 +325,14 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
          dh2 = ftp_para->input_tiles[task][0].h2;
          data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[ftp_para->from_layer].c;
          input_size += data_size;
-         printf(" %u", data_size); 
+         printf("Variation fused-layer [%d,%d) task size: %u\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, data_size); 
+         dw1 = ftp_para->output_tiles[task][ftp_para->fused_layers-1].w1;
+         dw2 = ftp_para->output_tiles[task][ftp_para->fused_layers-1].w2;
+         dh1 = ftp_para->output_tiles[task][ftp_para->fused_layers-1].h1;
+         dh2 = ftp_para->output_tiles[task][ftp_para->fused_layers-1].h2;
+         data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c;
+         output_size += data_size;
+         printf("Variation fused-layer [%d,%d) output size: %u\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, data_size); 
       }
    }
    printf("\n");
@@ -375,6 +391,15 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
    }
    printf("Layer [%u~%u) min layer-wise time: %f\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, total_time_layer_wise);
 
+   float* comp_size_partition = (float*)malloc(sizeof(float)*ftp_para->partitions_h*ftp_para->partitions_w);
+
+   for(i = 0; i < ftp_para->partitions_h; i++){
+     for(j = 0; j < ftp_para->partitions_w; j++){
+       task = ftp_para->task_id[i][j];
+       comp_size_partition[task] = 0;
+     }
+   }
+
    // calculate computation for fused-layer in BFLOPs per layer
    // count communication for layer-wise and fused-layer in KB
    for(l = ftp_para->fused_layers-1; l >= 0; l--) {
@@ -414,6 +439,7 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
            exit(-1);
          }
          comp_size_fused_layer += comp_size;
+         comp_size_partition[task] += comp_size;
        }
      }
      // original comp in BFLOPS
@@ -439,6 +465,7 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
      for(j = 0; j < ftp_para->partitions_w; j++){
        task = ftp_para->task_id[i][j];
        comm_size_in += sizeof(float)*ftp_para->input_tiles[task][0].w*ftp_para->input_tiles[task][0].h*net_para->input_maps[ftp_para->from_layer].c;
+       printf("Variation fused-layer [%d,%d) partition %d comp size: %f\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, task, comp_size_partition[task]);
      }
    }
    uint32_t comm_size_out = sizeof(float)*(net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].w*net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].h*net_para->output_maps[ftp_para->from_layer+ftp_para->fused_layers-1].c);
@@ -452,6 +479,8 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
      + coef_conv_inputs*comp_conv_var1 + coef_conv_filters*comp_conv_var2
      + coef_maxpool_inter // (ftp_para->fused_layers-num_conv)*coef_maxpool_inter
      + coef_maxpool_inputs*comp_maxpool_var1 + coef_maxpool_outputs*comp_maxpool_var2;
+   // increase 1d overhead only!
+   total_time_fused_layer_1d *= PARALLEL_OVERHEAD;
    printf("DEBUG fused-layer [%u, %u) 1 devices: tc %f (%f BFLOPS, %f KB: %f KB + %f KB)\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, total_time_fused_layer_1d, total_comp_size, comm_size, (float)comm_size_in/1024., (float)comm_size_out/1024.);
    total_time_fused_layer = total_time_fused_layer_1d; 
    t_layer_comp = total_time_fused_layer_1d;
@@ -462,15 +491,31 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
      float tc = total_time_fused_layer_1d/d*PARALLEL_OVERHEAD;
      // TODO(lizhou): assume the partition is exactly the same with number of devices
      // for this equation but should be updated to par_h*par_w
-     //uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
-     uint32_t num_partitons = d;
-     //uint32_t num_partitons = ftp_para->partitions_h*ftp_para->partitions_w; // use this will increase tc, since tx cost is higher
+     uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
+     //int32_t num_partitions = d;
+     uint32_t num_partitions = ftp_para->partitions_h*ftp_para->partitions_w; // use this will increase tc, since tx cost is higher
      // layer-wise comm, includes input and output tensor, should also decrease
-     float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitons*(float)(d-LOCAL_FACTOR)/(float)d)
+     //float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitions*(float)(d-LOCAL_FACTOR)/(float)d)
+     float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*d*(float)(d-LOCAL_FACTOR)/(float)d)
        + (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
+       // Warn: Use this with small number of partitions
        //+ (diff_comm_size > 0) ? (tx1*diff_comm_size*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2) : 0;
+
+     float t_wait = 0;
+     // Warn: if num_partitions >> d, no more devices are available for continous computation, and need to wait.
+     // TODO(lizhou): check!!
+     //float tin = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*num_partitions*1024.)+tx2*(float)(d-LOCAL_FACTOR)/(float)d);
+     //int32_t counter = 0;
+     //if (tin*(d-1)*1.2 < tc) {
+     //  counter = (int32_t)(num_partitions/d)-1 + (num_partitions%d > 0 ? 1 : 0); 
+     //  t_wait = (float)counter*(tc-tin*(d-1));
+     //  printf("Warn!!: add more devices for %d partitions (%d), tc vs (d-1)*tin, %f, %f, overhead (%d): %f\n", num_partitions, d, tc*(d-1), tin, counter, t_wait);
+     //}
+
      t_fused_layer = tc + tx;
-     printf("DEBUG fused-layer [%u, %u) %d devices: tc vs tx: %f, %f, total: %f\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, d, tc, tx, t_fused_layer);
+     t_fused_layer += t_wait;
+
+     printf("DEBUG fused-layer [%u, %u) %d devices: tc vs tx: %f, %f, t_wait: %f, total: %f\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, d, tc, tx, t_wait, t_fused_layer);
      printf("Info fused-layer [%u~%u) %d devices, comm_size_fused_layer vs. comm_size_layer_wise: %f/%f (KB) (-%f%) comm\n", ftp_para->from_layer, ftp_para->from_layer+ftp_para->fused_layers, d, comm_size*(float)(d-LOCAL_FACTOR)/d, total_comm_size_layer_wise, (total_comm_size_layer_wise - comm_size*(float)(d-LOCAL_FACTOR)/d)/total_comm_size_layer_wise*100.); 
      if (t_fused_layer*PARALLEL_GAIN < total_time_fused_layer) {
        total_time_fused_layer = t_fused_layer;
