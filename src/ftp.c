@@ -64,8 +64,14 @@ static tile_region traversal(network_parameters* net_para, tile_region output, u
       input.w2 = output.w2*stride + stride -1;
       input.h1 = output.h1*stride;
       input.h2 = output.h2*stride + stride -1;
+   }else if(net_para->type[l] == SHORTCUT_LAYER){
+      fprintf(stderr, "DEBUG: Traverse shortcut layer: %d\n", l);
+      input.w1 = output.w1;
+      input.w2 = output.w2;
+      input.h1 = output.h1;
+      input.h2 = output.h2;
    }else { 
-      fprintf(stderr, "Warn: Undefined partition layer: %d\n", l);
+      fprintf(stderr, "Warn: Traverse undefined partition layer: %d\n", l);
    }
    input.w = input.w2 -input.w1 + 1;
    input.h = input.h2 -input.h1 + 1;
@@ -91,8 +97,10 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_
      // 
    }else if(net_para->type[l] == POOLING_LAYER){
      // 
+   }else if(net_para->type[l] == SHORTCUT_LAYER){
+     //
    }else { 
-     fprintf(stderr, "Warn: Undefined partition layer: %d\n", l);
+     fprintf(stderr, "Warn: Perform FTP undefined partition layer: %d\n", l);
      num_undefined_layers++;
    }
   }

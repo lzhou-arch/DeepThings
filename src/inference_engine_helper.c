@@ -63,6 +63,9 @@ cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto){
    model->net_para->output_maps = (tile_region*) malloc(sizeof(tile_region)*(net->n));
    uint32_t l;
    for(l = 0; l < (net->n); l++){
+      // set stride to 1 for SHORTCUT
+      if (net->layers[l].type == SHORTCUT)
+        net->layers[l].stride = 1;
       model->net_para->stride[l] = net->layers[l].stride;
       model->net_para->filter[l] = net->layers[l].size;
       model->net_para->type[l] = net->layers[l].type;
@@ -330,6 +333,7 @@ void forward_partition(cnn_model* model, uint32_t task_id, bool is_reuse){
    uint32_t l;
    for(l = ftp_para->from_layer; l < ftp_para->from_layer + ftp_para->fused_layers; l++){
       uint32_t l_offset = l - ftp_para->from_layer;
+      //fprintf(stderr, "Setup layer: %u...\n", l);
       net.layers[l].h = ftp_para->input_tiles[task_id][l_offset].h;
       net.layers[l].out_h = (net.layers[l].h/net.layers[l].stride); 
       net.layers[l].w = ftp_para->input_tiles[task_id][l_offset].w;
@@ -358,6 +362,7 @@ void forward_partition(cnn_model* model, uint32_t task_id, bool is_reuse){
 
    for(l = ftp_para->from_layer; l < ftp_para->from_layer + ftp_para->fused_layers; l++){
       uint32_t l_offset = l - ftp_para->from_layer;
+      //fprintf(stderr, "Processing layer: %u...\n", l);
       net.layers[l].forward(net.layers[l], net);
       if (to_free == 1) {
          free(cropped_output); 

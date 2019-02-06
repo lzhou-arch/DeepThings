@@ -78,8 +78,10 @@ int main(int argc, char **argv){
    //char network_file[30] = "models/yolo.cfg";
    //char weight_file[30] = "models/yolo.weights";
    //
-   char network_file[30] = "models/resnet152.cfg";
-   char weight_file[30] = "models/resnet152.weights";
+   char network_file[30] = "models/resnet50.cfg";
+   char weight_file[30] = "models/resnet50.weights";
+   //char network_file[30] = "models/resnet152.cfg";
+   //char weight_file[30] = "models/resnet152.weights";
    // large
    //char network_file[30] = "models/vgg-16.cfg";
    //char weight_file[30] = "models/vgg-16.weights";

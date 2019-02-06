@@ -178,6 +178,7 @@ static inline void process_task(device_ctxt* ctxt, blob* temp, bool is_reuse){
 #if DATA_REUSE
    set_model_ftp_para_reuse(model, cur_sp);
 #endif
+   //fprintf(stderr, "Forwarding...\n");
    forward_partition(model, get_blob_task_id(temp), is_reuse);  
    result = new_blob_and_copy_data(0, 
               get_model_byte_size(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1), 
