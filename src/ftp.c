@@ -92,6 +92,14 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_
 #endif
   int32_t i, j, l;
   int32_t num_undefined_layers = 0;
+
+   ftp_parameters* ftp_para = (ftp_parameters*)malloc(sizeof(ftp_parameters));
+   ftp_para->partitions = N*M;
+   ftp_para->partitions_h = N;
+   ftp_para->partitions_w = M;
+   ftp_para->from_layer = from_layer;
+   ftp_para->fused_layers = fused_layers;
+
   for(l = from_layer+fused_layers-1; l >= (int32_t) from_layer; l--){
    if(net_para->type[l] == CONV_LAYER){
      // 
@@ -103,14 +111,11 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_
      fprintf(stderr, "Warn: Perform FTP undefined partition layer: %d\n", l);
      num_undefined_layers++;
    }
+   if(net_para->unfuseable[l] == 1){
+     fprintf(stderr, "Warn: Perform FTP routed layer: %d\n", l);
+     num_undefined_layers++;
+   }
   }
-
-   ftp_parameters* ftp_para = (ftp_parameters*)malloc(sizeof(ftp_parameters));
-   ftp_para->partitions = N*M;
-   ftp_para->partitions_h = N;
-   ftp_para->partitions_w = M;
-   ftp_para->from_layer = from_layer;
-   ftp_para->fused_layers = fused_layers;
 
    if (num_undefined_layers > 0) {
      ftp_para->layer_undefined = 1;
@@ -165,8 +170,9 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
    //float coef_conv_inter = -0.0518, coef_conv_inputs = 0.000001101, coef_conv_filters = 0.00006975; // alexnet only
    float coef_maxpool_inter = 0.0354664, coef_maxpool_inputs = -0.0002746, coef_maxpool_outputs = 0.0011031;
 
-   float tx1 = 0.000361*10, tx2 = 0.0983*10; // slowest x10
+   //float tx1 = 0.000361*10, tx2 = 0.0983*10; // slowest x10
    //float tx1 = 0.000361, tx2 = 0.0983; // my wifi
+   float tx1 = 0.0000875, tx2 = 0.0775; // arch wifi
    //float tx1 = 0.0002, tx2 = 0.002; // iros paper
    //float tx1 = 0.00002, tx2 = 0.0002; // 1/10 
    //float tx1 = 0.000000000001, tx2 = 0.000000000001; // simulate local memory
@@ -255,7 +261,7 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
 
        for (int d = 2; d <= MAX_EDGE_NUM; d++) {
          // consider the parallel coef, not exactly divide by d, with 10% overhead
-         float tc = t_layer_1d/d*PARALLEL_OVERHEAD; // decrease
+         float tc = t_layer_1d/d*PARALLEL_OVERHEAD; // add overhead 
          // Note: since comm and comp are pipelined, tx = (d-1) tx(in) + 1 tx(out)
          // tx can take more time, if tx(out) > tx(in), should add wait time
          // uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
@@ -380,8 +386,9 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
    //float coef_conv_inter = -0.0518, coef_conv_inputs = 0.000001101, coef_conv_filters = 0.00006975; // alexnet only
    float coef_maxpool_inter = 0.0354664, coef_maxpool_inputs = -0.0002746, coef_maxpool_outputs = 0.0011031;
 
-   float tx1 = 0.000361*10, tx2 = 0.0983*10; // slowest x10
+   //float tx1 = 0.000361*10, tx2 = 0.0983*10; // slowest x10
    //float tx1 = 0.000361, tx2 = 0.0983; // tx1 * x + tx2 my wifi
+   float tx1 = 0.0000875, tx2 = 0.0775; // arch wifi
    //float tx1 = 0.0002, tx2 = 0.002; // iros paper
    //float tx1 = 0.00002, tx2 = 0.0002; // 1/10
    //float tx1 = 0.000000000001, tx2 = 0.000000000001; // simulate local memory
@@ -436,7 +443,9 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
            comp_conv_var1 += c1*ftp_para->input_tiles[task][l].w*ftp_para->input_tiles[task][l].h;
            // TODO(lizhou): adjust the model for ftp, now add once for same layer 
            // NOTE: may lead to smaller results for 1 device.
-           comp_conv_var2 = (float)(size*size)/(float)(stride*stride)*n;
+           // Adjust: add fraction for debugging
+           if (task % 3 > 0)
+             comp_conv_var2 = (float)(size*size)/(float)(stride*stride)*n;
            comp_size = ((2.0*n*size*size*c1)*(ftp_para->output_tiles[task][l].w*ftp_para->output_tiles[task][l].h)/billion); // BFLOPS
          } else if (net_para->type[l+ftp_para->from_layer] == MAXPOOL) {
            comp_maxpool_var1 += ftp_para->input_tiles[task][l].w*ftp_para->input_tiles[task][l].h;
@@ -572,9 +581,9 @@ float dp_buttom_up(uint32_t from_layer, uint32_t fused_layers, network_parameter
        total_time = layer_wise_overhead_list[from_layer]->time + dp_buttom_up(from_layer+i, fused_layers-i, net_para, layer_wise_overhead_list, dp_opt_fused_layers);
      } else {
        //printf("Try fuse layers [%d, %d) ...\n", from_layer, from_layer+i);
-       // 2x2 by default
+       // 4x4 by default
        uint32_t N, M;
-       N = M = 4; 
+       N = M = 2; 
 
        float time_fused_layer;
 

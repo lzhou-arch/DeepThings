@@ -108,7 +108,8 @@ void send_result_thread(void *arg){
       temp = dequeue(ctxt->result_queue);
       // TODO(lizhou): fix the static ip
       char local_addr[ADDR_LEN];
-      strcpy(local_addr, "192.168.1.9");
+      //strcpy(local_addr, "192.168.1.9");
+      strcpy(local_addr, "192.168.0.100");
 
       if(get_blob_sp_id(temp) == ctxt->num_sp-1) {
         fprintf(stderr, "Send to gateway...\n");

@@ -56,6 +56,7 @@ typedef struct def_network_para{
    uint32_t *filter;
    uint32_t *type;
    uint32_t *n; // #filters for cnn layer
+   uint32_t *unfuseable; // mark routed layer
    tile_region *input_maps;
    tile_region *output_maps;
 } network_parameters;

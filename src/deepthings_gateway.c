@@ -14,9 +14,12 @@ static double commu_size;
 
 device_ctxt* deepthings_gateway_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t total_edge_number, const char** addr_list){
    device_ctxt* ctxt = init_gateway(total_edge_number, addr_list);
+
+#if 0
    // only need to load weights from [last_from_layer+last_fused_layer, n)
    //cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1], -1);
-   cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1]+1, from_layers[num_sp-1]+fused_layers[num_sp-1]+2); // TODO(lizhou): temp disabled.
+   //cnn_model* model = load_cnn_model(network, weights, from_layers[num_sp-1]+fused_layers[num_sp-1]+1, from_layers[num_sp-1]+fused_layers[num_sp-1]+2); // TODO(lizhou): temp disabled.
+   cnn_model* model = load_cnn_model(network, weights, 0, 1); // TODO(lizhou): temp disabled.
    model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
    for (int i = 0; i < num_sp; i++) {
      model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);
@@ -34,6 +37,7 @@ device_ctxt* deepthings_gateway_init(uint32_t num_sp, uint32_t* N, uint32_t* M, 
    model->ftp_para_reuse = model->ftp_para_reuse_list[0];
 #endif
    ctxt->model = model;
+#endif
    set_is_gateway(ctxt, 1);
    set_gateway_local_addr(ctxt, GATEWAY_LOCAL_ADDR);
    set_gateway_public_addr(ctxt, GATEWAY_PUBLIC_ADDR);
@@ -303,14 +307,14 @@ void deepthings_gateway(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* fro
 #endif
    // collect last split point result
    sys_thread_t t1 = sys_thread_new("deepthings_collect_result_thread", deepthings_collect_result_thread, ctxt, 0, 0);
-   sys_thread_t t2 = sys_thread_new("deepthings_merge_result_thread", deepthings_merge_result_thread, ctxt, 0, 0);
+   //sys_thread_t t2 = sys_thread_new("deepthings_merge_result_thread", deepthings_merge_result_thread, ctxt, 0, 0);
    //exec_barrier(START_CTRL, TCP, ctxt);
    exec_barrier_gateway(START_CTRL + 10, TCP, ctxt);
 #if DEBUG_TIMING
    start_time = sys_now_in_sec();
 #endif
    sys_thread_join(t1);
-   sys_thread_join(t2);
+   //sys_thread_join(t2);
 #if POLL_MODE 
    sys_thread_join(t3);
 #endif

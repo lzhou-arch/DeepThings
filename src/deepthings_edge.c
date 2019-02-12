@@ -240,10 +240,14 @@ void partition_frame_and_perform_inference_thread(void *arg){
             processed_locally = 0;
           }
           if (model->ftp_para->from_layer+model->ftp_para->fused_layers < model->ftp_para_list[i]->from_layer && model->ftp_para->gap_after == 1) {
-            fprintf(stderr, "Warning: Non fused layers in between, keep calm and carry on...\n");
+            fprintf(stderr, "Warning: Non fused layers in between [%d, %d), keep calm and carry on...\n", model->ftp_para->from_layer+model->ftp_para->fused_layers,
+                model->ftp_para_list[i]->from_layer);
             double time = sys_now_in_sec();
             forward_from_upto(model, model->ftp_para->from_layer+model->ftp_para->fused_layers, model->ftp_para_list[i]->from_layer);
-            printf("Process non-fused layers in: %f\n", sys_now_in_sec() - time);
+            printf("Process non-fused [%d, %d) layers in: %f\n",
+                model->ftp_para->from_layer+model->ftp_para->fused_layers,
+                model->ftp_para_list[i]->from_layer,
+                sys_now_in_sec() - time);
             i--;  // rollback
             model->ftp_para->gap_after = 0;  // set gap is done
             processed_locally = 1;
@@ -639,7 +643,8 @@ void* recv_reuse_data_from_edge_local(void* srv_conn, void* arg){
 
    // TODO(lizhou): record this cli ip addr
    //if(processing_cli_id != cli_id) notify_coverage((device_ctxt*)arg, temp, cli_id);
-   if(processing_cli_id != cli_id) notify_coverage_by_ip((device_ctxt*)arg, temp, cli_id, "192.168.1.9");
+   if(processing_cli_id != cli_id) notify_coverage_by_ip((device_ctxt*)arg, temp, cli_id, "192.168.0.100");
+   //if(processing_cli_id != cli_id) notify_coverage_by_ip((device_ctxt*)arg, temp, cli_id, "192.168.1.9");
    free_blob(temp);
 
 #if DEBUG_DEEP_GATEWAY

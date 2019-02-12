@@ -58,6 +58,7 @@ typedef struct cnn_model_wrapper{
 #define CONV_LAYER CONVOLUTIONAL /*CONVOLUTIONAL is from Darknet*/
 #define POOLING_LAYER MAXPOOL /*MAXPOOL is from Darknet*/
 #define SHORTCUT_LAYER SHORTCUT /*SHORTCUT is from Darknet*/
+#define ROUTE_LAYER ROUTE /*ROUTE is from Darknet*/
 #define image_holder image
 
 
