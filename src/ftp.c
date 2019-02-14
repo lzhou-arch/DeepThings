@@ -3,7 +3,7 @@
 #include "inference_engine_helper.h"
 
 #define LOCAL_FACTOR 1.0
-#define PARALLEL_OVERHEAD 1.10
+#define PARALLEL_OVERHEAD 1.00
 #define PARALLEL_GAIN 1.0
 #define MAX_LAYERS 48
 
@@ -223,10 +223,10 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
        // no comm cost, comp is estimated by a fixed value.
        //t_layer_min = t_layer_min = t_layer_1d = 0.5; // too high for alexnet 
        //t_layer_comp = t_layer_min = t_layer_1d = 0.05; // too high for alexnet 
-       t_layer_comp = t_layer_min = t_layer_1d = 0.5; // too high for alexnet 
+       t_layer_comp = t_layer_min = t_layer_1d = 0.0; // too high for alexnet 
        t_layer_comm = 0; 
        opt_d = 1; 
-       comp_size = 0.05;
+       comp_size = 0.00;
        comm_size_layer_wise = 0;
        if (net_para->type[l] == SHORTCUT) {
          t_layer_comp = t_layer_min = t_layer_1d = 0;
@@ -260,14 +260,17 @@ layer_wise_overhead** layer_wise_estimate(network_parameters* net_para){
        t_layer_comm = 0;
 
        for (int d = 2; d <= MAX_EDGE_NUM; d++) {
+         uint32_t num_partitions = d;
+         if (d > num_partitions) continue;
+
          // consider the parallel coef, not exactly divide by d, with 10% overhead
-         float tc = t_layer_1d/d*PARALLEL_OVERHEAD; // add overhead 
+         float tc = t_layer_1d/num_partitions*PARALLEL_OVERHEAD; // add overhead 
          // Note: since comm and comp are pipelined, tx = (d-1) tx(in) + 1 tx(out)
          // tx can take more time, if tx(out) > tx(in), should add wait time
          // uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
-         uint32_t num_partitions = d;
+         
          // layer-wise comm, includes input and output tensor, should also decrease
-         float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitions*(float)(d-LOCAL_FACTOR)/(float)(d));
+         float tx = (tx1*comm_size_in*(float)(d-1)/(d*1024.)+tx2*num_partitions*(float)(d-1)/(float)(d));
            //+ (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
            //+ (diff_comm_size > 0) ? (tx1*diff_comm_size*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2) : 0;
          t_layer = tc + tx;
@@ -443,9 +446,9 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
            comp_conv_var1 += c1*ftp_para->input_tiles[task][l].w*ftp_para->input_tiles[task][l].h;
            // TODO(lizhou): adjust the model for ftp, now add once for same layer 
            // NOTE: may lead to smaller results for 1 device.
-           // Adjust: add fraction for debugging
-           if (task % 3 > 0)
-             comp_conv_var2 = (float)(size*size)/(float)(stride*stride)*n;
+           // Adjust: add 1 per layer
+           if (task == 0)
+             comp_conv_var2 += (float)(size*size)/(float)(stride*stride)*n;
            comp_size = ((2.0*n*size*size*c1)*(ftp_para->output_tiles[task][l].w*ftp_para->output_tiles[task][l].h)/billion); // BFLOPS
          } else if (net_para->type[l+ftp_para->from_layer] == MAXPOOL) {
            comp_maxpool_var1 += ftp_para->input_tiles[task][l].w*ftp_para->input_tiles[task][l].h;
@@ -504,17 +507,23 @@ ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_par
    t_layer_comm = 0;
 
    for (int d = 2; d <= MAX_EDGE_NUM; d++) {
-     // add penalty
-     float tc = total_time_fused_layer_1d/d*PARALLEL_OVERHEAD;
-     // TODO(lizhou): assume the partition is exactly the same with number of devices
-     // for this equation but should be updated to par_h*par_w
-     uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
-     //int32_t num_partitions = d;
      uint32_t num_partitions = ftp_para->partitions_h*ftp_para->partitions_w; // use this will increase tc, since tx cost is higher
+     if (d > num_partitions) continue;
+
+     // add penalty
+     float tc = total_time_fused_layer_1d/num_partitions*PARALLEL_OVERHEAD;
+
+     // TODO(lizhou): assume the number of partitions is euqal or greater to number of devices
+     
+     // for this equation but should be updated to par_h*par_w
+     //uint32_t diff_comm_size = (comm_size_out > comm_size_in) ? comm_size_out - comm_size_in : 0;
+
      // layer-wise comm, includes input and output tensor, should also decrease
-     //float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*num_partitions*(float)(d-LOCAL_FACTOR)/(float)d)
-     float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*d*(float)(d-LOCAL_FACTOR)/(float)d)
-       + (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
+     float tx = (tx1*comm_size_in*(float)(num_partitions-LOCAL_FACTOR)/(num_partitions*1024.)+tx2*num_partitions*(float)(num_partitions-LOCAL_FACTOR)/(float)num_partitions)
+       + (tx1*comm_size_out*(float)(num_partitions-LOCAL_FACTOR)/(num_partitions*(num_partitions-1)*1024.)+tx2);
+
+     //float tx = (tx1*comm_size_in*(float)(d-LOCAL_FACTOR)/(d*1024.)+tx2*d*(float)(d-LOCAL_FACTOR)/(float)d)
+     //  + (tx1*comm_size_out*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2);
        // Warn: Use this with small number of partitions
        //+ (diff_comm_size > 0) ? (tx1*diff_comm_size*(float)(d-LOCAL_FACTOR)/(d*(d-1)*1024.)+tx2) : 0;
 
@@ -583,7 +592,7 @@ float dp_buttom_up(uint32_t from_layer, uint32_t fused_layers, network_parameter
        //printf("Try fuse layers [%d, %d) ...\n", from_layer, from_layer+i);
        // 4x4 by default
        uint32_t N, M;
-       N = M = 2; 
+       N = M = 4; 
 
        float time_fused_layer;
 
