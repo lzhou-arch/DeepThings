@@ -23,8 +23,8 @@ static double commu_size;
 //
 //
 
-device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
-   device_ctxt* ctxt = init_client(edge_id);
+device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
+   device_ctxt* ctxt = init_client(edge_id, total_edge_number, addr_list);
    // don't load weights
    cnn_model* model = load_cnn_model(network, weights, 0, 0);
 
@@ -49,8 +49,8 @@ device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M,
    return ctxt;
 }
 
-device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
-   device_ctxt* ctxt = init_client(edge_id);
+device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
+   device_ctxt* ctxt = init_client(edge_id, total_edge_number, addr_list);
    // Load model weights from [0, last_fused_layers)
    cnn_model* model = load_cnn_model(network, weights, 0, from_layers[num_sp-1] + fused_layers[num_sp-1]);
    model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
@@ -192,6 +192,31 @@ static inline void process_task(device_ctxt* ctxt, blob* temp, bool is_reuse){
    free_blob(result);
 }
 
+// work in pull mode, send out task remotely
+void send_task_data_thread(void *arg){
+   device_ctxt* ctxt = (device_ctxt*)arg;
+   service_conn* conn;
+   blob* temp;
+   int32_t task_counter;
+   while(1){
+      // TODO(lizhou): can be sequential
+      temp = try_dequeue(ctxt->remote_task_queue);
+      if(temp == NULL) break;
+      int32_t dst_id = get_blob_ip_addr(temp);
+      const char* cli_ip_addr = (const char*) ctxt->addr_list[dst_id];
+
+      conn = connect_service(TCP, cli_ip_addr, WORK_STEAL_PORT);
+      send_request("remote_exec", 20, conn);
+
+#if DEBUG_FLAG
+      task_counter ++;  
+      printf("send_task data for task %d:%d, total number is %d\n", get_blob_cli_id(temp), get_blob_task_id(temp), task_counter); 
+#endif
+      send_data(temp, conn);
+      free_blob(temp);
+      close_service_connection(conn);
+   }
+}
 
 void partition_frame_and_perform_inference_thread(void *arg){
    device_ctxt* ctxt = (device_ctxt*)arg;
@@ -267,8 +292,14 @@ void partition_frame_and_perform_inference_thread(void *arg){
         partition_and_enqueue(ctxt, frame_num);
 
         // first split point, read input from image and register workload.
+        
+#if POLL_MODE
         if (i==0) register_client(ctxt);
+#endif
         printf("Input before split point %d partitioned in: %lf seconds\n", i, sys_now_in_sec() - time);
+
+        // send out remote task
+        sys_thread_t t3 = sys_thread_new("send_task_data_thread", send_task_data_thread, ctxt, 0, 0);
 
         time = sys_now_in_sec();
         int num_task = 0;
@@ -276,6 +307,14 @@ void partition_frame_and_perform_inference_thread(void *arg){
         while(1){
            temp = try_dequeue(ctxt->task_queue);
            if(temp == NULL) break;
+
+           // TODO(lizhou): check if remote or local and send in another thread
+           //int32_t dst_id = get_blob_ip_addr(temp);
+           //if (dst_id > 0) {
+           //  send_task_data(ctxt, temp, dst_id);
+           //  continue;
+           //}
+
            bool data_ready = false;
 #if DEBUG_DEEP_EDGE
            printf("====================Processing task id is %d, data source is %d, frame_seq is %d, sp_id is %d====================\n", get_blob_task_id(temp), get_blob_cli_id(temp), get_blob_frame_seq(temp), get_blob_sp_id(temp));
@@ -318,12 +357,17 @@ void partition_frame_and_perform_inference_thread(void *arg){
            printf("======Communication size at edge is: %f======\n", ((double)commu_size)/(1024.0*1024.0*FRAME_NUM));
 #endif
         }
+
+        sys_thread_join(t3);
+
 #if DEBUG_TIMING
         printf("Early cnn before split point %d processed in: %lf (avg: %lf)\n", i, sys_now_in_sec() - time, (sys_now_in_sec() - time) / num_task);
 #endif
       }
+#if POLL_MODE
       /*Unregister and prepare for next image*/
       cancel_client(ctxt);
+#endif
    }
 #ifdef NNPACK
    pthreadpool_destroy(model->net->threadpool);
@@ -499,6 +543,64 @@ void steal_partition_and_perform_inference_thread(void *arg){
    pthreadpool_destroy(model->net->threadpool);
    nnp_deinitialize();
 #endif
+}
+
+static double total_remote_exec_time, remote_num_task;
+
+void remote_exec(void* srv_conn, void* arg) {
+   printf("remote_exec... ... \n");
+   device_ctxt* ctxt = (device_ctxt*)arg;
+   service_conn *conn = (service_conn *)srv_conn;
+#ifdef NNPACK
+   cnn_model* model = (cnn_model*)(ctxt->model);
+   nnp_initialize();
+   model->net->threadpool = pthreadpool_create(THREAD_NUM);
+#endif
+
+   int32_t cli_id;
+   int32_t frame_seq;
+   int32_t sp_id;
+   blob* temp = recv_data(conn);
+   cli_id = get_blob_cli_id(temp);
+   frame_seq = get_blob_frame_seq(temp);
+   sp_id = get_blob_sp_id(temp);
+
+   double time_tmp = sys_now_in_sec();
+   bool data_ready = true;
+//#if DATA_REUSE
+//   blob* reuse_info_blob = recv_data(conn);
+//   bool* reuse_data_is_required = (bool*) reuse_info_blob->data;
+//   request_reuse_data(ctxt, temp, reuse_data_is_required);
+//   if(!need_reuse_data_from_gateway(reuse_data_is_required)) data_ready = false; 
+//#if DEBUG_DEEP_EDGE
+//   printf("====================Processing task id is %d, data source is %d, frame_seq is %d====================\n", get_blob_task_id(temp), get_blob_cli_id(temp), get_blob_frame_seq(temp));
+//   printf("Request data from gateway, is the reuse data ready? ...\n");
+//   print_reuse_data_is_required(reuse_data_is_required);
+//#endif
+//
+//   free_blob(reuse_info_blob);
+//#endif
+   //close_service_connection(conn);
+   remote_num_task++;
+//#if DEBUG_TIMING
+//   time_tmp = sys_now_in_sec() - time_tmp;
+//   total_fetch_time +=  time_tmp;
+//   printf("Fetch task in: %lf (total: %lf/avg: %lf)\n", time_tmp, total_fetch_time, total_fetch_time/ num_task);
+//#endif
+   //time_tmp = sys_now_in_sec();
+   process_task(ctxt, temp, data_ready);
+#if DEBUG_TIMING
+   time_tmp = sys_now_in_sec() - time_tmp;
+   total_remote_exec_time +=  time_tmp;
+   printf("Process task in: %lf (total: %lf/avg: %lf)\n", time_tmp, total_remote_exec_time, total_remote_exec_time / remote_num_task);
+#endif
+   free_blob(temp);
+
+#ifdef NNPACK
+   pthreadpool_destroy(model->net->threadpool);
+   nnp_deinitialize();
+#endif
+   //return NULL;
 }
 
 
@@ -714,15 +816,14 @@ void* send_reuse_data_to_edge_local(void* srv_conn, void* arg){
 }
 #endif
 
-// TODO(lizhou)
-//void recv_partition_and_perform_inference_thread(void *arg){
-//   const char* request_types[]={"remote_exec"};
-//   void* (*handlers[])(void*, void*) = {remote_exec};
-//
-//   int wst_service = service_init(WORK_STEAL_PORT, TCP);
-//   start_service(wst_service, TCP, request_types, 1, handlers, arg);
-//   close_service(wst_service);
-//}
+void recv_partition_and_perform_inference_thread(void *arg){
+   const char* request_types[]={"remote_exec"};
+   void* (*handlers[])(void*, void*) = {remote_exec};
+
+   int wst_service = service_init(WORK_STEAL_PORT, TCP);
+   start_service(wst_service, TCP, request_types, 1, handlers, arg);
+   close_service(wst_service);
+}
 
 void deepthings_serve_stealing_thread(void *arg){
 #if DATA_REUSE
@@ -742,9 +843,25 @@ void deepthings_serve_stealing_thread(void *arg){
    close_service(wst_service);
 }
 
-void deepthings_stealer_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
+void send_task_data(device_ctxt* ctxt, blob* temp, int32_t dst_id){
+  service_conn* conn;
+  const char* cli_ip_addr = (const char*) ctxt->addr_list[dst_id];
 
-   device_ctxt* ctxt = deepthings_edge_init(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id);
+  fprintf(stderr, "Send to %c...\n", cli_ip_addr);
+  conn = connect_service(TCP, cli_ip_addr, WORK_STEAL_PORT);
+  send_request("remote_exec", 20, conn);
+
+#if DEBUG_FLAG
+  printf("send_task data for task %d:%d\n", get_blob_cli_id(temp), get_blob_task_id(temp)); 
+#endif
+  send_data(temp, conn);
+  free_blob(temp);
+  close_service_connection(conn);
+}
+
+void deepthings_stealer_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
+
+   device_ctxt* ctxt = deepthings_edge_init(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id, total_edge_number, addr_list);
    //exec_barrier(START_CTRL, TCP, ctxt);
    exec_barrier_edge(START_CTRL, TCP, ctxt);
 
@@ -759,9 +876,9 @@ void deepthings_stealer_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t
    sys_thread_join(t2);
 }
 
-void deepthings_victim_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
+void deepthings_victim_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
 
-   device_ctxt* ctxt = deepthings_edge_init(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id);
+   device_ctxt* ctxt = deepthings_edge_init(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id, total_edge_number, addr_list);
    //exec_barrier(START_CTRL, TCP, ctxt);
    exec_barrier_edge(START_CTRL, TCP, ctxt);
 
@@ -770,17 +887,17 @@ void deepthings_victim_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t*
 #if POLL_MODE
    sys_thread_t t3 = sys_thread_new("deepthings_serve_stealing_thread", deepthings_serve_stealing_thread, ctxt, 0, 0);
 #else  // Push mode
-   sys_thread_t t3 = sys_thread_new("deepthings_task_sharing_thread", deepthings_task_sharing_thread, ctxt, 0, 0);
+   //sys_thread_t t3 = sys_thread_new("send_task_data_thread", send_task_data_thread, ctxt, 0, 0);
 #endif
 
    sys_thread_t t4 = sys_thread_new("edge_collect_result_thread", edge_collect_result_thread, ctxt, 0, 0);
 
    sys_thread_join(t1);
    sys_thread_join(t2);
-   sys_thread_join(t3);
+   //sys_thread_join(t3);
    sys_thread_join(t4);
 }
 
-void deepthings_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id){
-   device_ctxt* ctxt = deepthings_edge_estimate(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id);
+void deepthings_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
+   device_ctxt* ctxt = deepthings_edge_estimate(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id, total_edge_number, addr_list);
 }

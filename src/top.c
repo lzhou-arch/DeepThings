@@ -26,7 +26,7 @@
 static const char* addr_list[MAX_EDGE_NUM] = EDGE_ADDR_LIST;
 
 int main(int argc, char **argv){
-   uint32_t total_cli_num = 0;
+   uint32_t total_cli_num = 1;
    uint32_t this_cli_id = 0;
 
    // set the num of split points
@@ -98,15 +98,17 @@ int main(int argc, char **argv){
       printf("Data source edge device\n");
       printf("This client ID is %d\n", get_int_arg(argc, argv, "-edge_id", 0));
       this_cli_id = get_int_arg(argc, argv, "-edge_id", 0);
-      deepthings_victim_edge(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id);
+      total_cli_num = get_int_arg(argc, argv, "-total_edge", 0);
+      deepthings_victim_edge(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id, total_cli_num, addr_list);
    }else if(0 == strcmp(get_string_arg(argc, argv, "-mode", "none"), "non_data_src")){
       printf("Idle edge device\n");
       printf("This client ID is %d\n", get_int_arg(argc, argv, "-edge_id", 0));
       this_cli_id = get_int_arg(argc, argv, "-edge_id", 0);
-      deepthings_stealer_edge(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id);
+      total_cli_num = get_int_arg(argc, argv, "-total_edge", 0);
+      deepthings_stealer_edge(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id, total_cli_num, addr_list);
    }else if(0 == strcmp(get_string_arg(argc, argv, "-mode", "none"), "estimate")) {
       printf("Find the optimal fused points\n");
-      deepthings_estimate(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id);
+      deepthings_estimate(num_sp, partitions_h, partitions_w, from_layers, fused_layers, network_file, weight_file, this_cli_id, total_cli_num, addr_list);
    }else {
       printf("Invalid cmd.\n");
       exit(-1);

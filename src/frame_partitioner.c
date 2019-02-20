@@ -10,6 +10,8 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
    uint32_t dw1, dw2;
    uint32_t dh1, dh2;
    uint32_t i, j;
+   uint32_t total_tasks = model->ftp_para->partitions_h*model->ftp_para->partitions_w;
+
    for(i = 0; i < model->ftp_para->partitions_h; i++){
       for(j = 0; j < model->ftp_para->partitions_w; j++){
          task = model->ftp_para->task_id[i][j];
@@ -25,8 +27,21 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
          data_size = sizeof(float)*(dw2-dw1+1)*(dh2-dh1+1)*net_para->input_maps[model->ftp_para->from_layer].c;
          temp = new_blob_and_copy_data((int32_t)task, data_size, (uint8_t*)data);
          free(data);
+#if POLL_MODE
          annotate_blob(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp);
+#else
+         int32_t dst_id = task < total_tasks/2 ? 0 : 1;
+         annotate_blob_push(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp, dst_id);
+#endif
+
+#if POLL_MODE
          enqueue(ctxt->task_queue, temp);
+#else
+         if (dst_id > 0)
+           enqueue(ctxt->remote_task_queue, temp);
+         else 
+           enqueue(ctxt->task_queue, temp);
+#endif
          free_blob(temp);
          printf("Task %u, size: %u\n", task, data_size); 
       }

@@ -1,9 +1,10 @@
 #include "client.h"
 
-device_ctxt* init_client(uint32_t cli_id){
+device_ctxt* init_client(uint32_t cli_id, uint32_t cli_num, const char** edge_addr_list){
    device_ctxt* ctxt = (device_ctxt*)malloc(sizeof(device_ctxt)); 
    /*Queues used in edge device*/
    ctxt->task_queue = new_queue(MAX_QUEUE_SIZE);
+   ctxt->remote_task_queue = new_queue(MAX_QUEUE_SIZE);
    ctxt->result_queue = new_queue(MAX_QUEUE_SIZE); 
    ctxt->ready_queue = new_queue(MAX_QUEUE_SIZE); 
    ctxt->this_cli_id = cli_id;
@@ -12,6 +13,14 @@ device_ctxt* init_client(uint32_t cli_id){
    ctxt->results_counter_sp = 0; 
    ctxt->ready_pool = new_queue(MAX_QUEUE_SIZE);
    //ctxt->ready_sp = 0;
+  
+   // active devices require these info
+   ctxt->total_cli_num = cli_num;
+   ctxt->addr_list = (char**)malloc(sizeof(char*)*cli_num);
+   for(int32_t i = 0; i < cli_num; i++){
+      ctxt->addr_list[i] = (char*)malloc(sizeof(char)*ADDR_LEN);
+      strcpy(ctxt->addr_list[i], edge_addr_list[i]);
+   }
 
    return ctxt;
 }

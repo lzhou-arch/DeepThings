@@ -17,5 +17,6 @@ int32_t get_blob_cli_id(blob* temp);
 int32_t get_blob_frame_seq(blob* temp);
 int32_t get_blob_task_id(blob* temp);
 int32_t get_blob_sp_id(blob* temp);
+int32_t get_blob_ip_addr(blob* temp);
 
 #endif

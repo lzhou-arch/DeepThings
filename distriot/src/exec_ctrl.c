@@ -78,6 +78,17 @@ void annotate_blob(blob* temp, int32_t cli_id, int32_t frame_seq, int32_t task_i
    fill_blob_meta(temp, sizeof(int32_t)*4, (uint8_t*)meta);
 }
 
+// TODO(lizhou): add annotation of current model split point
+void annotate_blob_push(blob* temp, int32_t cli_id, int32_t frame_seq, int32_t task_id, int32_t sp_id, int32_t dst_id){
+   int32_t meta[5];
+   meta[0] = cli_id;
+   meta[1] = frame_seq;
+   meta[2] = task_id;
+   meta[3] = sp_id;
+   meta[4] = dst_id;
+   fill_blob_meta(temp, sizeof(int32_t)*5, (uint8_t*)meta);
+}
+
 int32_t get_blob_cli_id(blob* temp){
    int32_t *meta = (int32_t*)(temp->meta);
    return meta[0];
@@ -96,6 +107,11 @@ int32_t get_blob_task_id(blob* temp){
 int32_t get_blob_sp_id(blob* temp){
    int32_t *meta = (int32_t*)(temp->meta);
    return meta[3];
+}
+
+int32_t get_blob_ip_addr(blob* temp){
+   int32_t *meta = (int32_t*)(temp->meta);
+   return meta[4];
 }
 
 

@@ -2,7 +2,7 @@
 #define CLIENT_H
 #include "darkiot.h"
 
-device_ctxt* init_client(uint32_t cli_id);
+device_ctxt* init_client(uint32_t cli_id, uint32_t cli_num, const char** edge_addr_list);
 void steal_and_process_thread(void *arg);
 void generate_and_process_thread(void *arg);
 void send_result_thread(void *arg);

@@ -10,7 +10,7 @@
 #define THREAD_NUM 1
 #define DATA_REUSE 0
 
-#define POLL_MODE 1
+#define POLL_MODE 0
 
 /*Debugging information for different components*/
 #define DEBUG_INFERENCE 0
@@ -18,7 +18,7 @@
 #define DEBUG_MULTI_FTP 0
 #define DEBUG_SERIALIZATION 0
 #define DEBUG_DEEP_GATEWAY 0
-#define DEBUG_DEEP_EDGE 1
+#define DEBUG_DEEP_EDGE 0
 #define DEBUG_REQUEST 0
 
 /*Print timing and communication size information*/
@@ -37,8 +37,10 @@
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12"}
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12", "192.168.1.13", "192.168.1.14"}
 //
-#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.101", "192.168.0.102", "192.168.0.103"}
-#define MAX_EDGE_NUM 4
+//
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.101", "192.168.0.102", "192.168.0.103"}
+#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102"}
+#define MAX_EDGE_NUM 2
 #define FRAME_NUM 1
 
 #define LOAD_AWARE 0
