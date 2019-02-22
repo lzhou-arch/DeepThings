@@ -23,6 +23,12 @@ int32_t* get_adjacent_task_id_list(cnn_model* model, uint32_t task_id){
    if(i>0) adjacent_id[2] = ftp_para_reuse->task_id[i-1][j];
    /*get the right overlapped data from tile on the left*/
    if(j>0) adjacent_id[3] = ftp_para_reuse->task_id[i][j-1];
+
+#if DATA_REUSE_LOCAL
+   adjacent_id[0] = adjacent_id[1] = -1;
+   // TODO(lizhou): add above block back.
+   adjacent_id[2] = -1;
+#endif
    
    return adjacent_id;
 }

@@ -1,5 +1,11 @@
 #include "darkiot.h"
 #include "frame_partitioner.h"
+int32_t get_task_dst_id(uint32_t task, uint32_t total_tasks) {
+  // evenly assign
+  return task / (total_tasks / MAX_EDGE_NUM);
+  // TODO(lizhou): return by ratio.
+}
+
 void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
    cnn_model* model = (cnn_model*)(ctxt->model);
    uint32_t task;
@@ -30,7 +36,8 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
 #if POLL_MODE
          annotate_blob(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp);
 #else
-         int32_t dst_id = task < total_tasks/2 ? 0 : 1;
+         // TODO(lizhou): add function that assign tasks to each device
+         int32_t dst_id = get_task_dst_id(task, total_tasks);
          annotate_blob_push(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp, dst_id);
 #endif
 
@@ -38,7 +45,7 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
          enqueue(ctxt->task_queue, temp);
 #else
          if (dst_id > 0)
-           enqueue(ctxt->remote_task_queue, temp);
+           enqueue(ctxt->remote_task_queues[dst_id-1], temp);
          else 
            enqueue(ctxt->task_queue, temp);
 #endif
@@ -47,6 +54,7 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
       }
    }
 
+#if POLL_MODE
 #if DATA_REUSE
 
    for(i = 0; i < model->ftp_para_reuse->partitions_h; i++){
@@ -74,7 +82,10 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
         }
       }
    }
+#endif  // DATA_REUSE
+#endif  // POLL_MODE
 
+#if DATA_REUSE
    clean_coverage(model->ftp_para_reuse);
    for(i = 0; i < model->ftp_para_reuse->partitions_h; i++){
       for(j = 0; j < model->ftp_para_reuse->partitions_w; j++){

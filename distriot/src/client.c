@@ -4,7 +4,9 @@ device_ctxt* init_client(uint32_t cli_id, uint32_t cli_num, const char** edge_ad
    device_ctxt* ctxt = (device_ctxt*)malloc(sizeof(device_ctxt)); 
    /*Queues used in edge device*/
    ctxt->task_queue = new_queue(MAX_QUEUE_SIZE);
-   ctxt->remote_task_queue = new_queue(MAX_QUEUE_SIZE);
+   //ctxt->remote_task_queue = new_queue(MAX_QUEUE_SIZE);
+   ctxt->remote_task_queues = new_multi_queue(cli_num, MAX_QUEUE_SIZE);
+
    ctxt->result_queue = new_queue(MAX_QUEUE_SIZE); 
    ctxt->ready_queue = new_queue(MAX_QUEUE_SIZE); 
    ctxt->this_cli_id = cli_id;

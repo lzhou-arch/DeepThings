@@ -654,6 +654,19 @@ void print_dp_time(layer_wise_overhead** layer_wise_overhead_list, uint32_t from
 }
 
 #if DATA_REUSE
+#if DATA_REUSE_LOCAL
+void local_reuse_aware_schedule(ftp_parameters_reuse* ftp_para_reuse){
+  // schedule anything but the first partition (top-left)
+  int32_t i, j;
+  for(i = 0; i < ftp_para_reuse->partitions_h; i++){
+     for(j = 0; j < ftp_para_reuse->partitions_w; j++){ 
+        ftp_para_reuse->schedule[ftp_para_reuse->task_id[i][j]] = 1;
+     }
+  }
+  ftp_para_reuse->schedule[ftp_para_reuse->task_id[0][0]] = 0;
+}
+#endif
+
 /*Establish a dependency list, 0 means no dependencies, 1 depends on 0, 2 depends on 1 ...*/
 /*For current implementation, we only have 2 levels of dependency*/
 /*For example, in a 3x3 grid, the dependency is like below:       
@@ -700,6 +713,10 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
       print_tile_region(overlapped_region.right_region);
 #endif
    }
+#if DATA_REUSE_LOCAL
+   // do nothing for blocks on the right and below.
+   // TODO(lizhou): and above for now, needs to identify which above blocks are local.
+#else
    /*Processing the block above*/
    if(i > 0) {
       adjacent_task = ftp_para_reuse->task_id[i-1][j]; 
@@ -719,6 +736,7 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
       print_tile_region(overlapped_region.down_region);
 #endif
    }
+
    /*Processing the block on the right*/
    if((j + 1) < ftp_para_reuse->partitions_w) {
       adjacent_task = ftp_para_reuse->task_id[i][j+1]; 
@@ -757,6 +775,7 @@ tile_region remove_and_record_overlapped_region_at_output(uint32_t i, uint32_t j
       print_tile_region(overlapped_region.up_region);
 #endif
    }
+#endif  // DATA_REUSE_LOCAL
    remaining_region.w = remaining_region.w2 - remaining_region.w1 + 1;
    remaining_region.h = remaining_region.h2 - remaining_region.h1 + 1;
 
@@ -863,6 +882,13 @@ void calculate_reuse_data_size(ftp_parameters_reuse* ftp_para_reuse, network_par
    if(i>0) adjacent_id[2] = ftp_para_reuse->task_id[i-1][j];
    /*get the right overlapped data from tile on the left*/
    if(j>0) adjacent_id[3] = ftp_para_reuse->task_id[i][j-1];
+   
+#if DATA_REUSE_LOCAL
+   // remove blocks in the right and below
+   adjacent_id[0] = adjacent_id[1] = -1;
+   // TODO(lizhou): remove above for now, add them back.
+   adjacent_id[2] = -1;
+#endif
 
    ftp_para_reuse->adjacent_reuse_data_size[task_id]=0;
    ftp_para_reuse->self_reuse_data_size[task_id]=0;
@@ -910,7 +936,11 @@ ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parame
          ftp_para_reuse->task_id[i][j] = ftp_para->task_id[i][j];
       }
    }
+#if DATA_REUSE_LOCAL
+   local_reuse_aware_schedule(ftp_para_reuse);
+#else
    reuse_aware_schedule(ftp_para_reuse);
+#endif
 
    /*Copy the grid output from normal ftp*/
    for(i = 0; i < ftp_para_reuse->partitions_h; i++){
@@ -955,6 +985,10 @@ ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parame
          }
       }
    }
+
+   // TODO(lizhou): update the schedule policy, process the partitions sequentially and 
+   // later partition partially replies on previous partitions.
+
    for(i = 0; i < ftp_para_reuse->partitions_h; i++){
       for(j = 0; j < ftp_para_reuse->partitions_w; j++){
 #if DEBUG_FTP
@@ -975,6 +1009,7 @@ ftp_parameters_reuse* preform_ftp_reuse(network_parameters* net_para, ftp_parame
                ftp_para_reuse->input_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer] = 
                        traversal(net_para, ftp_para_reuse->output_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer], l);
                if(l>ftp_para_reuse->from_layer) 
+                 // Note: new local reuse policy only remove left and above overlapped regions
                  ftp_para_reuse->output_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer-1] = remove_and_record_overlapped_region_at_output(i, j, l-ftp_para_reuse->from_layer-1,  ftp_para_reuse, ftp_para_reuse->input_tiles[ftp_para_reuse->task_id[i][j]][l-ftp_para_reuse->from_layer]);
             }
 #if DEBUG_FTP
@@ -1037,6 +1072,24 @@ bool is_reuse_ready(ftp_parameters_reuse* ftp_para_reuse, uint32_t task_id){
    uint32_t j = task_id%(ftp_para_reuse->partitions_w);
    uint32_t adj_task;
    bool ready = true;
+#if DATA_REUSE_LOCAL
+   // check only left and above
+   if(j > 0){
+      adj_task = ftp_para_reuse->task_id[i][j-1];
+      if(ftp_para_reuse->coverage[adj_task] == 0) {
+         ready = false;
+         return ready;
+      }	
+   }
+   // not check above for now
+   //if(i > 0){
+   //   adj_task = ftp_para_reuse->task_id[i-1][j];
+   //   if(ftp_para_reuse->coverage[adj_task] == 0) {
+   //      ready = false;
+   //      return ready;
+   //   }	
+   //}
+#else
    if(i + 1 < ftp_para_reuse->partitions_h){
       adj_task = ftp_para_reuse->task_id[i+1][j];
       if(ftp_para_reuse->coverage[adj_task] == 0) {
@@ -1065,6 +1118,7 @@ bool is_reuse_ready(ftp_parameters_reuse* ftp_para_reuse, uint32_t task_id){
          return ready;
       }	
    }
+#endif
    return ready;
 }
 

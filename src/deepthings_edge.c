@@ -89,6 +89,53 @@ device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uin
 }
 
 #if DATA_REUSE
+#if DATA_REUSE_LOCAL
+static overlapped_tile_data* overlapped_data_pool_local[FUSED_POINTS_MAX][MAX_EDGE_NUM][PARTITIONS_MAX];
+
+void save_local_reuse_data(device_ctxt* ctxt, blob* task_input_blob) {
+  printf("saving_local_reuse_data ... ... \n");
+  cnn_model* model = (cnn_model*)(ctxt->model);
+  /*if task doesn't generate any reuse_data*/
+  // in local sharing mode, every partition generates reuse_data for right and above partitions
+  //if(model->ftp_para_reuse->schedule[get_blob_task_id(task_input_blob)] == 1) return;
+
+  blob* temp  = self_reuse_data_serialization(ctxt, get_blob_task_id(task_input_blob), get_blob_frame_seq(task_input_blob));
+  copy_blob_meta(temp, task_input_blob);
+
+#if DEBUG_DEEP_EDGE
+  printf("save self reuse data for task %d:%d:%d \n", get_blob_cli_id(task_input_blob), get_blob_task_id(task_input_blob), get_blob_sp_id(task_input_blob)); 
+#endif
+
+  int32_t cli_id;
+  int32_t task_id;
+  int32_t sp_id;
+
+  cli_id = get_blob_cli_id(temp);
+  task_id = get_blob_task_id(temp);
+  sp_id = get_blob_sp_id(temp);
+   
+  //set_model_ftp_para(model, sp_id);
+
+  printf("collecting_reuse_data ... ... \n");
+  //if (model->cur_sp != sp_id) {
+  //  fprintf(stderr, "Error: fuse point doesn't match (%d:%d)!\n", model->cur_sp, sp_id);
+  //  exit(-1);
+  //}
+
+  if(overlapped_data_pool_local[sp_id][cli_id][task_id] != NULL)
+     free_self_overlapped_tile_data(model,  overlapped_data_pool_local[sp_id][cli_id][task_id]);
+
+  overlapped_data_pool_local[sp_id][cli_id][task_id] = self_reuse_data_deserialization(model, task_id, (float*)temp->data, get_blob_frame_seq(temp));
+
+  printf("update_coverage ... ... \n");
+  set_coverage(model->ftp_para_reuse, get_blob_task_id(temp));
+  set_missing(model->ftp_para_reuse, get_blob_task_id(temp));
+  free_blob(temp);
+
+  return NULL;
+}
+#endif
+
 void send_reuse_data(device_ctxt* ctxt, blob* task_input_blob){
    cnn_model* model = (cnn_model*)(ctxt->model);
    /*if task doesn't generate any reuse_data*/
@@ -115,6 +162,49 @@ void send_reuse_data(device_ctxt* ctxt, blob* task_input_blob){
    send_data(temp, conn);
    free_blob(temp);
    close_service_connection(conn);
+}
+
+void load_local_reuse_data(device_ctxt* ctxt, blob* task_input_blob, bool* reuse_data_is_required){
+  printf("loading_reuse_data ... ... \n");
+  cnn_model* model = (cnn_model*)(ctxt->model);
+  /*if task doesn't require any reuse_data*/
+  if(model->ftp_para_reuse->schedule[get_blob_task_id(task_input_blob)] == 0) return;/*Task without any dependency*/
+
+  if(!need_reuse_data_from_gateway(reuse_data_is_required)) return;/*Reuse data are all generated locally*/
+
+  int32_t cli_id;
+  int32_t task_id;
+  int32_t sp_id;
+  uint32_t frame_num;
+
+  cli_id = get_blob_cli_id(task_input_blob);
+  task_id = get_blob_task_id(task_input_blob);
+  sp_id = get_blob_sp_id(task_input_blob);
+
+  frame_num = get_blob_frame_seq(task_input_blob);
+
+  set_model_ftp_para(model, sp_id);
+
+  uint32_t position;
+  int32_t* adjacent_id = get_adjacent_task_id_list(model, task_id);
+
+  for(position = 0; position < 4; position++){
+     if(adjacent_id[position]==-1) continue;
+     if(reuse_data_is_required[position]){
+        place_self_deserialized_data(model, adjacent_id[position], overlapped_data_pool_local[sp_id][cli_id][adjacent_id[position]]);
+     }
+  }
+  free(adjacent_id);
+
+/*
+  // TODO(lizhou): remove serialization/deserialization steps
+  blob* temp = adjacent_reuse_data_serialization(ctxt, task_id, frame_num, reuse_data_is_required);
+  copy_blob_meta(temp, task_input_blob);
+  overlapped_tile_data** temp_region_and_data = adjacent_reuse_data_deserialization(model, get_blob_task_id(temp), (float*)temp->data, get_blob_frame_seq(temp), reuse_data_is_required);
+  place_adjacent_deserialized_data(model, get_blob_task_id(temp), temp_region_and_data, reuse_data_is_required);
+
+  free_blob(temp);
+*/
 }
 
 void request_reuse_data(device_ctxt* ctxt, blob* task_input_blob, bool* reuse_data_is_required){
@@ -185,7 +275,11 @@ static inline void process_task(device_ctxt* ctxt, blob* temp, bool is_reuse){
               (uint8_t*)(get_model_output(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1))
             );
 #if DATA_REUSE
+#if DATA_REUSE_LOCAL
+   save_local_reuse_data(ctxt, temp);
+#else
    send_reuse_data(ctxt, temp);
+#endif
 #endif
    copy_blob_meta(result, temp);
    enqueue(ctxt->result_queue, result); 
@@ -197,24 +291,32 @@ void send_task_data_thread(void *arg){
    device_ctxt* ctxt = (device_ctxt*)arg;
    service_conn* conn;
    blob* temp;
-   int32_t task_counter;
+   int32_t task_counter = 0;
    while(1){
       // TODO(lizhou): can be sequential
-      temp = try_dequeue(ctxt->remote_task_queue);
-      if(temp == NULL) break;
-      int32_t dst_id = get_blob_ip_addr(temp);
-      const char* cli_ip_addr = (const char*) ctxt->addr_list[dst_id];
+      bool finish = true;
+      for(int32_t i = 0; i < MAX_EDGE_NUM-1; i++) { 
+        temp = try_dequeue(ctxt->remote_task_queues[i]);
+        if(temp == NULL) continue;
+        else {
+          finish = false;
 
-      conn = connect_service(TCP, cli_ip_addr, WORK_STEAL_PORT);
-      send_request("remote_exec", 20, conn);
-
+          int32_t dst_id = get_blob_ip_addr(temp);
+          const char* cli_ip_addr = (const char*) ctxt->addr_list[dst_id];
+    
+          conn = connect_service(TCP, cli_ip_addr, WORK_STEAL_PORT);
+          send_request("remote_exec", 20, conn);
+    
 #if DEBUG_FLAG
-      task_counter ++;  
-      printf("send_task data for task %d:%d, total number is %d\n", get_blob_cli_id(temp), get_blob_task_id(temp), task_counter); 
+          task_counter ++;  
+          printf("send_task data for task %d:%d, total number is %d\n", get_blob_cli_id(temp), get_blob_task_id(temp), task_counter); 
 #endif
-      send_data(temp, conn);
-      free_blob(temp);
-      close_service_connection(conn);
+          send_data(temp, conn);
+          free_blob(temp);
+          close_service_connection(conn);
+        }
+      }
+      if (finish) break;
    }
 }
 
@@ -334,7 +436,12 @@ void partition_frame_and_perform_inference_thread(void *arg){
               printf("Request data from gateway, is there anything missing locally? ...\n");
               print_reuse_data_is_required(reuse_data_is_required);
 #endif/*DEBUG_DEEP_EDGE*/
+#if DATA_REUSE_LOCAL
+              // don't need to request if process locally
+              load_local_reuse_data(ctxt, temp, reuse_data_is_required);
+#else
               request_reuse_data(ctxt, temp, reuse_data_is_required);
+#endif
               free(reuse_data_is_required);
            }
 #if DEBUG_DEEP_EDGE
@@ -358,6 +465,7 @@ void partition_frame_and_perform_inference_thread(void *arg){
 #endif
         }
 
+        // sync with remote tasks
         sys_thread_join(t3);
 
 #if DEBUG_TIMING
@@ -565,8 +673,40 @@ void remote_exec(void* srv_conn, void* arg) {
    frame_seq = get_blob_frame_seq(temp);
    sp_id = get_blob_sp_id(temp);
 
+   set_model_ftp_para(model, sp_id);
+
    double time_tmp = sys_now_in_sec();
-   bool data_ready = true;
+   bool data_ready = false;
+#if DATA_REUSE
+   data_ready = is_reuse_ready(model->ftp_para_reuse, get_blob_task_id(temp));
+   if((model->ftp_para_reuse->schedule[get_blob_task_id(temp)] == 1) && data_ready) {
+     blob* shrinked_temp = new_blob_and_copy_data(get_blob_task_id(temp),
+         (model->ftp_para_reuse->shrinked_input_size[get_blob_task_id(temp)]),
+         (uint8_t*)(model->ftp_para_reuse->shrinked_input[get_blob_task_id(temp)]));
+     copy_blob_meta(shrinked_temp, temp);
+     free_blob(temp);
+     temp = shrinked_temp;
+
+     //bool* reuse_data_is_required = (bool*)malloc(sizeof(bool)*4);
+     bool* reuse_data_is_required = check_missing_coverage(model, get_blob_task_id(temp), get_blob_frame_seq(temp));
+#if DEBUG_DEEP_EDGE
+     printf("Request data from gateway, is there anything missing locally? ...\n");
+     print_reuse_data_is_required(reuse_data_is_required);
+#endif/*DEBUG_DEEP_EDGE*/
+#if DATA_REUSE_LOCAL
+     // don't need to request if process locally
+     load_local_reuse_data(ctxt, temp, reuse_data_is_required);
+#else
+     request_reuse_data(ctxt, temp, reuse_data_is_required);
+#endif
+     free(reuse_data_is_required);
+   }
+#if DEBUG_DEEP_EDGE
+   if((model->ftp_para_reuse->schedule[get_blob_task_id(temp)] == 1) && (!data_ready))
+     printf("The reuse data is not ready yet!\n");
+#endif/*DEBUG_DEEP_EDGE*/
+#endif/*DATA_REUSE*/
+
 //#if DATA_REUSE
 //   blob* reuse_info_blob = recv_data(conn);
 //   bool* reuse_data_is_required = (bool*) reuse_info_blob->data;
@@ -700,7 +840,7 @@ void notify_coverage_by_ip(device_ctxt* ctxt, blob* task_input_blob, uint32_t cl
    close_service_connection(conn);
 }
 
-static overlapped_tile_data* overlapped_data_pool_local[FUSED_POINTS_MAX][MAX_EDGE_NUM][PARTITIONS_MAX];
+//static overlapped_tile_data* overlapped_data_pool_local[FUSED_POINTS_MAX][MAX_EDGE_NUM][PARTITIONS_MAX];
 
 void* recv_reuse_data_from_edge_local(void* srv_conn, void* arg){
    printf("collecting_reuse_data ... ... \n");
@@ -733,10 +873,10 @@ void* recv_reuse_data_from_edge_local(void* srv_conn, void* arg){
 
    // set the correct sp ftp_para_reuse
    //gateway_model->ftp_para_reuse = gateway_model->ftp_para_reuse_list[sp_id];
-   if (gateway_model->cur_sp != sp_id) {
-     fprintf(stderr, "Error: fuse point doesn't match!\n");
-     exit(-1);
-   }
+   //if (gateway_model->cur_sp != sp_id) {
+   //  fprintf(stderr, "Error: fuse point doesn't match!\n");
+   //  exit(-1);
+   //}
 
    if(overlapped_data_pool_local[sp_id][cli_id][task_id] != NULL)
       free_self_overlapped_tile_data(gateway_model,  overlapped_data_pool_local[sp_id][cli_id][task_id]);

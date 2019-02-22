@@ -18,7 +18,7 @@ typedef struct dev_ctxt {
    uint32_t total_cli_num;
 
    thread_safe_queue* task_queue;
-   thread_safe_queue* remote_task_queue;
+   thread_safe_queue** remote_task_queues;
    thread_safe_queue* result_queue; 
    // collect temp results
    thread_safe_queue* ready_queue; 

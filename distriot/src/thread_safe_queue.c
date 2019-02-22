@@ -9,6 +9,24 @@ static queue_node* new_node_and_copy_item(blob* item)
    return temp; 
 }
 
+thread_safe_queue** new_multi_queue(uint32_t n, uint32_t capacity)
+{
+
+  thread_safe_queue** mq = (thread_safe_queue**)malloc(sizeof(thread_safe_queue*)*(n-1));
+  for (int32_t i = 0; i < n-1; i++) {
+    thread_safe_queue *q = (thread_safe_queue*)malloc(sizeof(thread_safe_queue));
+    q->head = q->tail = NULL;
+    q->capacity = capacity;
+    q->number_of_node = 0;
+    sys_sem_new(&(q->not_empty), 0);
+    sys_sem_new(&(q->not_full), 0);
+    sys_sem_new(&(q->mutex), 1);
+    q->wait_send = 0;
+    mq[i] = q;
+  }
+  return mq;
+}
+
 thread_safe_queue *new_queue(uint32_t capacity)
 {
    thread_safe_queue *q = (thread_safe_queue*)malloc(sizeof(thread_safe_queue));

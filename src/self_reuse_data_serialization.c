@@ -129,6 +129,4 @@ void place_self_deserialized_data(cnn_model* model, uint32_t task_id, overlapped
    free(adjacent_id);
 }
 
-
 #endif
-

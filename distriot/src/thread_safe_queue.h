@@ -20,6 +20,7 @@ typedef struct ts_queue {
    uint32_t wait_send;
 } thread_safe_queue;
 
+thread_safe_queue**new_multi_queue(uint32_t n, uint32_t capacity);
 thread_safe_queue *new_queue(uint32_t capacity);
 void enqueue(thread_safe_queue *q, blob* item);
 blob* dequeue(thread_safe_queue *q);

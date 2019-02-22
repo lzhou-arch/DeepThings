@@ -8,7 +8,8 @@
 #define PARTITIONS_H_MAX 6
 #define PARTITIONS_MAX 36
 #define THREAD_NUM 1
-#define DATA_REUSE 0
+#define DATA_REUSE 1
+#define DATA_REUSE_LOCAL 1
 
 #define POLL_MODE 0
 
@@ -38,9 +39,9 @@
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12", "192.168.1.13", "192.168.1.14"}
 //
 //
-//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.101", "192.168.0.102", "192.168.0.103"}
-#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102"}
-#define MAX_EDGE_NUM 2
+#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.101", "192.168.0.102", "192.168.0.103"}
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102"}
+#define MAX_EDGE_NUM 4
 #define FRAME_NUM 1
 
 #define LOAD_AWARE 0
