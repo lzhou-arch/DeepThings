@@ -11,7 +11,6 @@ static queue_node* new_node_and_copy_item(blob* item)
 
 thread_safe_queue** new_multi_queue(uint32_t n, uint32_t capacity)
 {
-
   thread_safe_queue** mq = (thread_safe_queue**)malloc(sizeof(thread_safe_queue*)*(n-1));
   for (int32_t i = 0; i < n-1; i++) {
     thread_safe_queue *q = (thread_safe_queue*)malloc(sizeof(thread_safe_queue));

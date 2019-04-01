@@ -26,8 +26,10 @@ int32_t* get_adjacent_task_id_list(cnn_model* model, uint32_t task_id){
 
 #if DATA_REUSE_LOCAL
    adjacent_id[0] = adjacent_id[1] = -1;
-   // TODO(lizhou): add above block back.
    adjacent_id[2] = -1;
+   // check if left and above position is local
+   //if(!ftp_para_reuse->is_local[adjacent_id[2]]) adjacent_id[2] = -1;
+   if(!ftp_para_reuse->is_local[adjacent_id[3]]) adjacent_id[3] = -1;
 #endif
    
    return adjacent_id;

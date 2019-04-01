@@ -2,14 +2,14 @@
 #define CONFIGURE_H
 
 /*Partitioning paramters*/
-#define FUSED_POINTS_MAX 8
+#define FUSED_POINTS_MAX 30
 #define FUSED_LAYERS_MAX 32
 #define PARTITIONS_W_MAX 6
 #define PARTITIONS_H_MAX 6
 #define PARTITIONS_MAX 36
 #define THREAD_NUM 1
-#define DATA_REUSE 1
-#define DATA_REUSE_LOCAL 1
+#define DATA_REUSE 0
+#define DATA_REUSE_LOCAL 0
 
 #define POLL_MODE 0
 
@@ -24,7 +24,7 @@
 
 /*Print timing and communication size information*/
 #define DEBUG_TIMING 1
-#define DEBUG_COMMU_SIZE 1
+#define DEBUG_COMMU_SIZE 0
 
 /*Configuration parameters for DistrIoT*/
 //#define GATEWAY_PUBLIC_ADDR "192.168.1.9"
@@ -38,10 +38,16 @@
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12"}
 //#define EDGE_ADDR_LIST    {"192.168.1.9", "192.168.1.10", "192.168.1.11", "192.168.1.12", "192.168.1.13", "192.168.1.14"}
 //
-//
-#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.101", "192.168.0.102", "192.168.0.103"}
-//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102"}
-#define MAX_EDGE_NUM 4
+// max 8 devices
+//#define EDGE_ADDR_LIST    {"192.168.0.100"} 
+#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102"}
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102", "192.168.0.103"}
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102", "192.168.0.103", "192.168.0.110"}
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102", "192.168.0.103", "192.168.0.110","192.168.0.111"}
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102", "192.168.0.103", "192.168.0.110", "192.168.0.111", "192.168.0.112"}
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102", "192.168.0.103", "192.168.0.110", "192.168.0.111", "192.168.0.112", "192.168.0.113"}
+//#define EDGE_ADDR_LIST    {"192.168.0.100", "192.168.0.102", "192.168.0.103", "192.168.0.110", "192.168.0.111", "192.168.0.112", "192.168.0.113", "192.168.0.114"}
+#define MAX_EDGE_NUM 2
 #define FRAME_NUM 1
 
 #define LOAD_AWARE 0

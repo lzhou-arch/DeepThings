@@ -21,8 +21,11 @@ static double commu_size;
 //#define FUSED_DEEPTH 18
 //#define STOP_AT_LAYER 18
 //
-//
 
+/*
+ * estimate the optimal partition and parallalelization strategy for a given model
+ * under certain computing resources and network conditions.
+ */
 device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
    device_ctxt* ctxt = init_client(edge_id, total_edge_number, addr_list);
    // don't load weights
@@ -49,13 +52,13 @@ device_ctxt* deepthings_edge_estimate(uint32_t num_sp, uint32_t* N, uint32_t* M,
    return ctxt;
 }
 
-device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
+device_ctxt* deepthings_edge_init(uint32_t num_sp, uint32_t* num_d, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
    device_ctxt* ctxt = init_client(edge_id, total_edge_number, addr_list);
    // Load model weights from [0, last_fused_layers)
    cnn_model* model = load_cnn_model(network, weights, 0, from_layers[num_sp-1] + fused_layers[num_sp-1]);
    model->ftp_para_list = (ftp_parameters**)malloc(sizeof(ftp_parameters*)*num_sp);
    for (int i = 0; i < num_sp; i++) {
-     model->ftp_para_list[i] = preform_ftp(N[i], M[i], from_layers[i], fused_layers[i], model->net_para);
+     model->ftp_para_list[i] = preform_ftp(num_d[i], N[i], M[i], from_layers[i], fused_layers[i], model->net_para, edge_id);
      if (i > 0) {
        if (model->ftp_para_list[i-1]->from_layer+model->ftp_para_list[i-1]->fused_layers < model->ftp_para_list[i]->from_layer) {
          model->ftp_para_list[i-1]->gap_after = 1;
@@ -293,8 +296,8 @@ void send_task_data_thread(void *arg){
    blob* temp;
    int32_t task_counter = 0;
    while(1){
-      // TODO(lizhou): can be sequential
       bool finish = true;
+      // send out one block per device
       for(int32_t i = 0; i < MAX_EDGE_NUM-1; i++) { 
         temp = try_dequeue(ctxt->remote_task_queues[i]);
         if(temp == NULL) continue;
@@ -359,19 +362,21 @@ void partition_frame_and_perform_inference_thread(void *arg){
 #endif
             float* fused_output = (float*)(temp->data);
             // keep output for the last fused layer
-            //set_model_output(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1, fused_output);
             set_model_input(model, fused_output);
+            //fprintf(stderr, "Set output for layer %u..\n",
+            //    model->ftp_para->from_layer+model->ftp_para->fused_layers-1);
+            set_model_output(model, model->ftp_para->from_layer+model->ftp_para->fused_layers-1, fused_output);
           } else {
             // input is from local layer
-            set_model_input(model, model->net->layers[model->ftp_para->from_layer+model->ftp_para->fused_layers-1].output);
+            set_model_input(model, model->net->layers[model->ftp_para_list[i]->from_layer-1].output);
             processed_locally = 0;
           }
           if (model->ftp_para->from_layer+model->ftp_para->fused_layers < model->ftp_para_list[i]->from_layer && model->ftp_para->gap_after == 1) {
-            fprintf(stderr, "Warning: Non fused layers in between [%d, %d), keep calm and carry on...\n", model->ftp_para->from_layer+model->ftp_para->fused_layers,
+            fprintf(stderr, "Warning: Non fused layers in between [%u, %u), keep calm and carry on...\n", model->ftp_para->from_layer+model->ftp_para->fused_layers,
                 model->ftp_para_list[i]->from_layer);
             double time = sys_now_in_sec();
             forward_from_upto(model, model->ftp_para->from_layer+model->ftp_para->fused_layers, model->ftp_para_list[i]->from_layer);
-            printf("Process non-fused [%d, %d) layers in: %f\n",
+            printf("Process non-fused [%u, %u) layers in: %f\n",
                 model->ftp_para->from_layer+model->ftp_para->fused_layers,
                 model->ftp_para_list[i]->from_layer,
                 sys_now_in_sec() - time);
@@ -379,6 +384,17 @@ void partition_frame_and_perform_inference_thread(void *arg){
             model->ftp_para->gap_after = 0;  // set gap is done
             processed_locally = 1;
             continue;
+          }
+        } else {
+          if (model->ftp_para_list[i]->from_layer > 0) {
+            fprintf(stderr, "Warning: Non fused layers in between [0, %u), keep calm and carry on...\n", model->ftp_para_list[i]->from_layer);
+            double time = sys_now_in_sec();
+            forward_from_upto(model, 0, model->ftp_para_list[i]->from_layer);
+            printf("Process non-fused [0, %u) layers in: %f\n",
+                model->ftp_para_list[i]->from_layer,
+                sys_now_in_sec() - time);
+            set_model_input(model,
+                model->net->layers[model->ftp_para_list[i]->from_layer-1].output);
           }
         }
 
@@ -999,9 +1015,9 @@ void send_task_data(device_ctxt* ctxt, blob* temp, int32_t dst_id){
   close_service_connection(conn);
 }
 
-void deepthings_stealer_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
+void deepthings_stealer_edge(uint32_t num_sp, uint32_t* num_d, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
 
-   device_ctxt* ctxt = deepthings_edge_init(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id, total_edge_number, addr_list);
+   device_ctxt* ctxt = deepthings_edge_init(num_sp, num_d, N, M, from_layers, fused_layers, network, weights, edge_id, total_edge_number, addr_list);
    //exec_barrier(START_CTRL, TCP, ctxt);
    exec_barrier_edge(START_CTRL, TCP, ctxt);
 
@@ -1016,9 +1032,9 @@ void deepthings_stealer_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t
    sys_thread_join(t2);
 }
 
-void deepthings_victim_edge(uint32_t num_sp, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
+void deepthings_victim_edge(uint32_t num_sp, uint32_t* num_d, uint32_t* N, uint32_t* M, uint32_t* from_layers, uint32_t* fused_layers, char* network, char* weights, uint32_t edge_id, uint32_t total_edge_number, const char** addr_list){
 
-   device_ctxt* ctxt = deepthings_edge_init(num_sp, N, M, from_layers, fused_layers, network, weights, edge_id, total_edge_number, addr_list);
+   device_ctxt* ctxt = deepthings_edge_init(num_sp, num_d, N, M, from_layers, fused_layers, network, weights, edge_id, total_edge_number, addr_list);
    //exec_barrier(START_CTRL, TCP, ctxt);
    exec_barrier_edge(START_CTRL, TCP, ctxt);
 

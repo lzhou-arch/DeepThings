@@ -1,10 +1,6 @@
 #include "darkiot.h"
+#include "schedule.h"
 #include "frame_partitioner.h"
-int32_t get_task_dst_id(uint32_t task, uint32_t total_tasks) {
-  // evenly assign
-  return task / (total_tasks / MAX_EDGE_NUM);
-  // TODO(lizhou): return by ratio.
-}
 
 void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
    cnn_model* model = (cnn_model*)(ctxt->model);
@@ -17,6 +13,7 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
    uint32_t dh1, dh2;
    uint32_t i, j;
    uint32_t total_tasks = model->ftp_para->partitions_h*model->ftp_para->partitions_w;
+   uint32_t num_devices = model->ftp_para->num_devices;
 
    for(i = 0; i < model->ftp_para->partitions_h; i++){
       for(j = 0; j < model->ftp_para->partitions_w; j++){
@@ -37,16 +34,19 @@ void partition_and_enqueue(device_ctxt* ctxt, uint32_t frame_num){
          annotate_blob(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp);
 #else
          // TODO(lizhou): add function that assign tasks to each device
-         int32_t dst_id = get_task_dst_id(task, total_tasks);
+         int32_t dst_id = get_task_dst_id(task, total_tasks, num_devices);
+         //fprintf(stderr, "Assign task %u to dev %u..\n", task, dst_id);
+         if (dst_id < 0) fprintf(stderr, "Error: check the assigned device id.\n");
          annotate_blob_push(temp, get_this_client_id(ctxt), frame_num, task, model->cur_sp, dst_id);
 #endif
 
 #if POLL_MODE
          enqueue(ctxt->task_queue, temp);
 #else
+         // push into remote queue
          if (dst_id > 0)
            enqueue(ctxt->remote_task_queues[dst_id-1], temp);
-         else 
+         else  // push into local queue
            enqueue(ctxt->task_queue, temp);
 #endif
          free_blob(temp);

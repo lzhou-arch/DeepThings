@@ -1,4 +1,5 @@
 #include "ftp.h"
+#include "schedule.h"
 #include "configure.h"
 #include "inference_engine_helper.h"
 
@@ -86,7 +87,7 @@ static tile_region traversal(network_parameters* net_para, tile_region output, u
    return input;
 }
 
-ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_t fused_layers, network_parameters* net_para){
+ftp_parameters* preform_ftp(uint32_t num_d, uint32_t N, uint32_t M, uint32_t from_layer, uint32_t fused_layers, network_parameters* net_para, uint32_t cli_id){
 #if DEBUG_MULTI_FTP
   fprintf(stderr, "Perform ftp from [%d, %d)\n", from_layer, from_layer + fused_layers);
 #endif
@@ -99,6 +100,8 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_
    ftp_para->partitions_w = M;
    ftp_para->from_layer = from_layer;
    ftp_para->fused_layers = fused_layers;
+   ftp_para->num_devices = num_d;
+   ftp_para->num_tasks = 0;
 
   for(l = from_layer+fused_layers-1; l >= (int32_t) from_layer; l--){
    if(net_para->type[l] == CONV_LAYER){
@@ -149,6 +152,23 @@ ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from_layer, uint32_
          }
       }
    }
+
+#if 0
+   // assign task to device
+   uint32_t total_tasks = ftp_para->partitions_h*ftp_para->partitions_w;
+   uint32_t num_devices = ftp_para->num_devices;
+   int32_t task, dst_id;
+
+   for(i = 0; i < ftp_para->partitions_h; i++){
+      for(j = 0; j < ftp_para->partitions_w; j++){
+         task = ftp_para->task_id[i][j];
+         dst_id = get_task_dst_id(task, total_tasks, num_devices);
+         if (dst_id < 0) fprintf(stderr, "Error: check the assigned device id.\n");
+         // TODO(lizhou): store task id for each device.
+         if (dst_id == cli_id) ftp_para->local_task_id[ftp_para->num_tasks++] = task;
+      }
+   }
+#endif
    return ftp_para;
 }
 
@@ -600,7 +620,8 @@ float dp_buttom_up(uint32_t from_layer, uint32_t fused_layers, network_parameter
          time_fused_layer = fused_layer_overhead_list[from_layer][i]->time;
        } else {
          ftp_parameters* ftp_para = (ftp_parameters*)malloc(sizeof(ftp_parameters));
-         ftp_para = preform_ftp(N, M, from_layer, i, net_para);
+         // default num devices = 1
+         ftp_para = preform_ftp(1, N, M, from_layer, i, net_para, 0);
          if (ftp_para->layer_undefined == 1) {
            // range of layers can't be fused, use layer-wise results instead
            for(j = from_layer; j < from_layer+i; j++) {
@@ -656,13 +677,13 @@ void print_dp_time(layer_wise_overhead** layer_wise_overhead_list, uint32_t from
 #if DATA_REUSE
 #if DATA_REUSE_LOCAL
 void local_reuse_aware_schedule(ftp_parameters_reuse* ftp_para_reuse){
-  // schedule anything but the first partition (top-left)
   int32_t i, j;
   for(i = 0; i < ftp_para_reuse->partitions_h; i++){
      for(j = 0; j < ftp_para_reuse->partitions_w; j++){ 
         ftp_para_reuse->schedule[ftp_para_reuse->task_id[i][j]] = 1;
      }
   }
+  // TODO(lizhou): schedule anything but the first partition (top-left) for each device
   ftp_para_reuse->schedule[ftp_para_reuse->task_id[0][0]] = 0;
 }
 #endif
@@ -1076,15 +1097,17 @@ bool is_reuse_ready(ftp_parameters_reuse* ftp_para_reuse, uint32_t task_id){
    // check only left and above
    if(j > 0){
       adj_task = ftp_para_reuse->task_id[i][j-1];
-      if(ftp_para_reuse->coverage[adj_task] == 0) {
+      if(ftp_para_reuse->is_local[adj_task] == 1 &&
+          ftp_para_reuse->coverage[adj_task] == 0) {
          ready = false;
          return ready;
       }	
    }
-   // not check above for now
+   // TODO(lizhou): check above
    //if(i > 0){
    //   adj_task = ftp_para_reuse->task_id[i-1][j];
-   //   if(ftp_para_reuse->coverage[adj_task] == 0) {
+   //   if(ftp_para_reuse->is_local[adj_task] == 1 && 
+   //       ftp_para_reuse->coverage[adj_task] == 0) {
    //      ready = false;
    //      return ready;
    //   }	

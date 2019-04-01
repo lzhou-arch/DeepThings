@@ -69,11 +69,12 @@ cnn_model* load_cnn_model(char* cfg, char* weights, int from, int upto){
         net->layers[l].stride = 1;
       // set routed layer as unfuseable
       if (net->layers[l].type == ROUTE_LAYER){
-        for(uint32_t i = 0; i < net->layers[l].n; i++) {
-          int routed_layer = net->layers[l].input_layers[i];
-          fprintf(stderr, "Warn: Set routed layer %d unfuseable.\n", routed_layer);
-          model->net_para->unfuseable[routed_layer] = 1;
-        }
+        // Note: allow a single routed layer to be parallelized, but not fused.
+        //for(uint32_t i = 0; i < net->layers[l].n; i++) {
+        //  int routed_layer = net->layers[l].input_layers[i];
+        //  fprintf(stderr, "Warn: Set routed layer %d unfuseable.\n", routed_layer);
+        //  model->net_para->unfuseable[routed_layer] = 1;
+        //}
       }
 
       model->net_para->stride[l] = net->layers[l].stride;

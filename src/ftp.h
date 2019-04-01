@@ -37,6 +37,8 @@ typedef struct partition_range{
 } tile_region;
 
 typedef struct def_ftp_para{
+   uint32_t num_devices;
+   uint32_t num_tasks;
    int32_t layer_undefined;
    uint32_t partitions;
    uint32_t partitions_w;
@@ -45,6 +47,7 @@ typedef struct def_ftp_para{
    uint32_t from_layer;
    uint32_t fused_layers;
    int gap_after;
+   uint32_t local_task_id[PARTITIONS_MAX];
    uint32_t task_id[PARTITIONS_H_MAX][PARTITIONS_W_MAX];
    tile_region input_tiles[PARTITIONS_MAX][FUSED_LAYERS_MAX];
    tile_region output_tiles[PARTITIONS_MAX][FUSED_LAYERS_MAX];
@@ -91,6 +94,7 @@ typedef struct def_ftp_parameters_reuse{
    uint32_t fused_layers;
    uint32_t task_id[PARTITIONS_H_MAX][PARTITIONS_W_MAX];
    uint32_t schedule[PARTITIONS_MAX];
+   uint32_t is_local[PARTITIONS_MAX];
    tile_region input_tiles[PARTITIONS_MAX][FUSED_LAYERS_MAX];
    tile_region output_tiles[PARTITIONS_MAX][FUSED_LAYERS_MAX];
    overlapped_tile_data output_reuse_regions[PARTITIONS_MAX][FUSED_LAYERS_MAX];
@@ -114,7 +118,7 @@ void set_data(overlapped_tile_data * overlap, uint32_t pos, float* data);
 
 #endif
 
-ftp_parameters* preform_ftp(uint32_t N, uint32_t M, uint32_t from, uint32_t fused_layers, network_parameters* net_para);
+ftp_parameters* preform_ftp(uint32_t num_d, uint32_t N, uint32_t M, uint32_t from, uint32_t fused_layers, network_parameters* net_para, uint32_t cli_id);
 layer_wise_overhead** layer_wise_estimate(network_parameters* net_para);
 ftp_overhead* ftp_estimate(network_parameters* net_para, ftp_parameters* ftp_para, layer_wise_overhead** layer_wise_overhead_list);
 float dp_buttom_up(uint32_t from_layer, uint32_t fused_layers, network_parameters* net_para, layer_wise_overhead** layer_wise_overhead_list, uint32_t* dp_opt_fused_layers);
